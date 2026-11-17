@@ -32,6 +32,8 @@ const Core = (() => {
     ogpo: 79002, osgop: 14079, regFee: 20180, diag: 15990,
     oil: 20200, oilKm: 7500, tires: 122000, tiresKm: 60000, taxTech: 27653, battery: 828,
     otbLoan: 50000, otbCap: 938600, otbCap26: 865000, otbPrem: 20, otbRate: 2,
+    ds: 0,                    // договорная сумма Отбасы (0: вдвое больше цели, половина своя, половина заём)
+    maxWeek: 72,              // потолок часов в неделю: прогноз и советы не просят больше
   };
 
   // ---------------------------------------------------------------- даты
@@ -89,7 +91,7 @@ const Core = (() => {
   }
   function newState(t) {
     t = t || today();
-    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {}, car: null, bad: {}, diary: {}, live: null };
+    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {}, car: null, bad: {}, diary: {}, live: null, sleep: {}, reload: {} };
   }
   function migrate(s) {
     if (!s || typeof s !== 'object') return newState();
@@ -105,7 +107,7 @@ const Core = (() => {
     if (!out.months || typeof out.months !== 'object') out.months = {};
     out.set.tpl = (out.set.tpl || DEF.tpl).slice(0, 7).map(x => +x || 0);
     while (out.set.tpl.length < 7) out.set.tpl.push(0);
-    for (const k of ['shifts', 'over', 'done', 'del', 'bad', 'diary']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
+    for (const k of ['shifts', 'over', 'done', 'del', 'bad', 'diary', 'sleep', 'reload']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
     // смена с таймером: {d, start, brk: [[с, по]], on (начало перерыва), end}
     if (!out.live || typeof out.live !== 'object' || !out.live.d || !(out.live.start > 0)) out.live = null; else if (!Array.isArray(out.live.brk)) out.live.brk = [];
     // старые копии с целью без даты: день, когда поставил цель, не должен каждый день переезжать на сегодня
@@ -542,14 +544,91 @@ const Core = (() => {
     const dl = st.set.deadline, f0 = forecast(st, iso);
     if (f0.goal && f0.goal.iso <= dl) return { extra: 0, slackDays: isoDiff(f0.goal.iso, dl), fc: f0 };
     if (phaseOn(st.set, isoAdd(dl, -1)) === 'pre') return { extra: null, fc: f0 };
-    let lo = 0, hi = 48;
+    // не больше потолка часов в неделю: сверх него советовать часы нельзя
+    const cap = st.set.maxWeek > 0 ? st.set.maxWeek : 72, week = (st.set.tpl || []).reduce((a, b) => a + (+b || 0), 0);
+    let lo = 0, hi = Math.max(0, Math.min(48, cap - week));
     const base = { s0: f0.s0, R: f0.R, events: futureEvents(st, iso) };
     const ok = x => { const f = forecast(st, iso, Object.assign({ extraWeek: x }, base)); return f.goal && f.goal.iso <= dl; };
-    if (!ok(hi)) return { extra: null, fc: f0 };
+    if (!(hi > 0) || !ok(hi)) return { extra: null, fc: f0, capped: cap - week < 48, cap };
     for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2; if (ok(mid)) hi = mid; else lo = mid; }
     return { extra: Math.ceil(hi * 2) / 2, fc: f0 };
   }
 
+  // ---------------------------------------------------------------- штамп и раскладка смены
+  // штамп за заработок в час, не за длину: в такси по выручке пассажиров в час, в доставке по деньгам на руки (цены ноября 2026)
+  const GRADES = [['S+', 4200, 1400], ['S', 3700, 1100], ['A', 3200, 850], ['B', 2900, 650], ['C', 0, 0]];
+  function gradeOf(st, d, h, app) {
+    if (!(h > 0) || !(app > 0)) return null;
+    const g = st.set, ph = phaseAt(st, d), fr = growth(g, mkOf(d))[1], perH = app / h, pre = ph === 'pre';
+    const v = pre ? perH / fr : perH / keepOf(g, ph) / fr, i = GRADES.findIndex(x => v >= (pre ? x[2] : x[1])), nv = i > 0 ? (pre ? GRADES[i - 1][2] : GRADES[i - 1][1]) : 0;
+    // v и пороги в ценах ноября 2026 (штамп не дешевеет с ростом цен), vN: те же числа в ценах дня смены, их и показываем
+    return { g: GRADES[i][0], v, vN: v * fr, perH, ph, next: i > 0 ? { g: GRADES[i - 1][0], v: nv, vN: nv * fr } : null };
+  }
+  // куда ушли деньги пассажиров за смену: примерная раскладка по модели, и доля жизни на эту смену
+  function shiftMoney(st, d, h, app) {
+    const g = st.set, ph = phaseAt(st, d), mk = mkOf(d), fc = growth(g, mk)[0], dm = dayMoney(st, d, h, app);
+    const mp = monthPlan(st, mk), shifts = Math.max(1, (mp.sh || 0) + (mp.preSh || 0)), fixed = dayFixed(st, d, lastMoney(st, d)) * dim(mk) / shifts;
+    if (ph === 'pre') return { ph, app: dm.income, net: dm.net, fixed, goal: dm.net - fixed, day: dayFixed(st, d, lastMoney(st, d)) };
+    const gross = dm.income / keepOf(g, ph);
+    return { ph, gross, yandex: gross * g.yandex / 100, park: ph === 'rent' ? gross * g.park / 100 : 0, tax: gross * g.tax / 100, app: dm.income,
+      rent: ph === 'rent' ? g.rentDay * fc : 0, fuel: fuelPerHour(g, mk, ph, gasOnDay(g, d, ph)) * h, wash: g.wash26 / 26 * fc,
+      wear: ph === 'own' ? (g.oil / g.oilKm + g.tires / g.tiresKm) * g.kmH * h * fc : 0, net: dm.net, fixed, goal: dm.net - fixed, day: dayFixed(st, d, lastMoney(st, d)) };
+  }
+  // ---------------------------------------------------------------- три замка Отбасы
+  // Заём 50/50 под 3,5-5% дают, когда депозиту 3 года, на нём половина договорной суммы (ДС) и оценочный показатель от 16.
+  // ОП = сумма (деньги на счёте x 2% x время) / (ДС / 1000): считаем помесячно и примерно; ОП из приложения банка сильнее расчёта
+  const OP_TIERS = [[16, 5, 6], [20, 4.8, 7], [25, 4.5, 8], [29, 4.2, 9], [35, 4, 10], [41, 3.8, 11], [45, 3.7, 12], [48, 3.5, 14], [53, 3.5, 16], [57, 3.5, 18], [61, 3.5, 21], [66, 3.5, 23], [74, 3.5, 25]];
+  const tierOf = op => { let t = null; for (const x of OP_TIERS) if (op >= x[0]) t = { op: x[0], rate: x[1], years: x[2] }; return t; };
+  function otbLocks(st, iso, fc) {
+    const g = st.set, ds = g.ds > 0 ? g.ds : 2 * g.target, open = g.otbOpen;
+    if (!open || !(ds > 0)) return null;
+    const k = 0.02 / 12 / (ds / 1000), half = ds / 2, line = moneyLine(st, iso), rows = fc ? fc.rows : [], nowMk = mkOf(iso);
+    const an = st.money.filter(m => !isAdd(m) && m.op > 0 && m.d <= iso).sort(byDate).pop() || null;
+    // остаток: по записям до сегодня, дальше по прогнозу на конец месяца
+    const histBal = end => { let v = 0; for (const p of line) { if (p.d > end) break; v = p.otb || 0; } return v; };
+    const futBal = mk => { const r = rows.find(x => x.mk === mk); return r ? r.otb : null; };
+    // остаток x дни с from по to: каждая сумма работает со дня, когда её положили, как считает банк
+    const balDays = (from, to) => {
+      if (from > to) return 0;
+      let s = 0, d = from, v = histBal(isoAdd(from, -1));
+      for (const p of line) { if (p.d < from) continue; if (p.d > to) break; s += Math.max(0, v) * isoDiff(d, p.d); d = p.d; v = p.otb || 0; }
+      return s + Math.max(0, v) * (isoDiff(d, to) + 1);
+    };
+    const bal0 = histBal(iso), l1 = addYears(open, 3), lastMk = rows.length ? rows[rows.length - 1].mk : nowMk, opAt = {};
+    let op = 0, opNow = 0, l2 = null, l3 = null, interim = null, prev = null;
+    for (let i = 0, mk = mkOf(open); i < 600 && mk <= lastMk; i++, mk = mkAdd(mk, 1)) {
+      const D = dim(mk), end = mk + '-' + pad(D), first = mk === mkOf(open) ? open : mk + '-01';
+      let bal;
+      if (mk <= nowMk) {
+        const lim = mk < nowMk ? end : iso;
+        // ОП из приложения банка на дату сверки сильнее расчёта, после неё копим дальше
+        if (an && mkOf(an.d) === mk && an.d >= first) op = an.op + balDays(isoAdd(an.d, 1), lim) * k / D;
+        else op += balDays(first, lim) * k / D;
+        bal = mk < nowMk ? histBal(end) : bal0;
+        if (mk === nowMk) { opNow = op; op += Math.max(0, bal0) * k * isoDiff(iso, end) / D; prev = Math.max(bal0, futBal(mk) || 0); }
+      } else {
+        // будущий месяц: деньги приходят в течение месяца, берём среднее между концом прошлого и этого
+        const cur = futBal(mk); if (cur == null) break;
+        const p0 = prev != null ? prev : bal0;
+        op += Math.max(0, (p0 + cur) / 2) * k * (mk === mkOf(open) ? (D - +open.slice(8) + 1) / D : 1);
+        bal = cur; prev = cur;
+      }
+      opAt[mk] = op;
+      // даты замков по последнему пересечению: если банк или сверка показали меньше, дата сдвигается
+      if (bal < half - 0.5) l2 = null;
+      else if (!l2) l2 = mk <= nowMk ? (line.find(p => mkOf(p.d) === mk && p.otb >= half - 0.5) || { d: first }).d : end;
+      if (op < 16) l3 = null; else if (!l3) l3 = end;
+      if (op >= 5 && bal >= half - 0.5) { if (!interim) interim = end; } else interim = null;
+    }
+    const buy = l2 && l3 ? [l1, l2, l3].sort().pop() : null, opBuy = buy && opAt[mkOf(buy)] != null ? opAt[mkOf(buy)] : null;
+    // сколько депозит пустой прямо сейчас: с открытия или с дня, когда остаток стал нулём
+    let since = open;
+    for (const p of line) { if (p.d > iso) break; if ((p.otb || 0) > 0) since = null; else if (since == null) since = p.d < open ? open : p.d; }
+    const emptyMonths = bal0 <= 0 && since && since <= iso ? Math.floor(isoDiff(since, iso) / 30.44) : 0;
+    return { ds, open, half, opNow, bal: bal0, anchored: an ? an.d : null,
+      locks: [{ k: 'time', date: l1, ok: iso >= l1 }, { k: 'half', date: l2, ok: bal0 >= half - 0.5, now: bal0 }, { k: 'op', date: l3, ok: opNow >= 16, now: opNow }],
+      buy, interim, tier: tierOf(opBuy != null ? opBuy : opNow), opBuy, tiers: OP_TIERS, emptyMonths };
+  }
   // ---------------------------------------------------------------- смены: день, неделя, месяц
   // сколько остаётся с часа сверх плана: выручка после комиссий и налога минус топливо
   function hourValue(st, iso) {
@@ -724,7 +803,7 @@ const Core = (() => {
     DEF, datesFrom, newState, migrate, today, isoAdd, isoDiff, mkOf, mkAdd, mkDiff, dim, dow, monday, addYears, pad,
     plural, money, mln, num1, grp, dateLong, dateShort, monthName, daysText, untilText, DOW, DOWL, MON,
     planHours, phaseOn, phaseOfMonth, monthPlan, keepOf, fuelPerHour, growth, annuity, carValue, startCost, workMonth, project,
-    addMonths, loanRate, applyCar, loanPlan, payoffPreview, carNow,
+    addMonths, loanRate, applyCar, loanPlan, payoffPreview, carNow, gradeOf, GRADES, shiftMoney, otbLocks, OP_TIERS, tierOf,
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
     phaseAt, shiftAfter, hasOv, moneyKey, forget, rentVsOwn, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,

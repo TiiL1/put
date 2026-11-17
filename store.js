@@ -140,7 +140,7 @@ const Store = (() => {
   const hasData = s => !!(s && s.money && s.money.length);
   const union = (a, b) => Array.from(new Set((a || []).concat(b || [])));
   // что уже праздновали, только растёт: уровень и награды, увиденные на одном устройстве, не празднуем снова на другом
-  const seenOf = (a, b) => { a = a || {}; b = b || {}; return { level: Math.max(a.level || 1, b.level || 1), badges: union(a.badges, b.badges), recap: union(a.recap, b.recap).slice(-40) }; };
+  const seenOf = (a, b) => { a = a || {}; b = b || {}; return { level: Math.max(a.level || 1, b.level || 1), badges: union(a.badges, b.badges), recap: union(a.recap, b.recap).slice(-40), chests: union(a.chests, b.chests).slice(-60) }; };
   const withSeen = next => Object.assign(next, { seen: seenOf(state && state.seen, next.seen) });
   // слияние, когда менялись и телефон, и облако: смены, сверки, вехи, задания и отметки объединяются, настройки берём новее.
   // Удалённое (del: путь -> когда удалили) не возвращается с другого устройства, если запись там не правили позже удаления
@@ -150,7 +150,7 @@ const Store = (() => {
     for (const [p, t] of Object.entries(newer.del || {})) del[p] = Math.max(del[p] || 0, +t || 0);
     // у смен, заданий и конвертов месяца есть своё время правки u (или создания t); у простых отметок судим по последней правке устройства
     const live = (p, x, s) => !del[p] || (x && typeof x === 'object' ? x.u || x.t || 0 : s.updated || 0) > del[p];
-    for (const k of ['shifts', 'over', 'done', 'mood', 'months', 'bad', 'diary']) {
+    for (const k of ['shifts', 'over', 'done', 'mood', 'months', 'bad', 'diary', 'sleep', 'reload']) {
       out[k] = {};
       for (const s of [older, newer]) for (const [id, x] of Object.entries(s[k] || {})) if (live(k + '/' + id, x, s)) out[k][id] = x;
     }
@@ -161,6 +161,10 @@ const Store = (() => {
     // своя машина: берём ту, что правили позже; удалённая не возвращается
     const cars = [a.car, b.car].filter(c => c && c.on && (c.u || 0) > (del.car || 0)).sort((x, y) => (x.u || 0) - (y.u || 0));
     out.car = cars.length ? cars[cars.length - 1] : null;
+    // таймер смены: берём тот, что меняли позже; сброшенный или уже внесённый не возвращается
+    const lives = [a.live, b.live].filter(L => L && L.start && (L.u || L.start) > (del.live || 0)).sort((x, y) => (x.u || x.start) - (y.u || y.start));
+    const L = lives.length ? lives[lives.length - 1] : null;
+    out.live = L && !(out.shifts[L.d] && out.shifts[L.d].s === L.start) ? JSON.parse(JSON.stringify(L)) : null;
     out.seen = seenOf(a.seen, b.seen);
     out.updated = Math.max(Date.now(), (a.updated || 0) + 1, (b.updated || 0) + 1); out.dev = device;
     return out;

@@ -21,5 +21,55 @@
    "type": "image/png",
    "purpose": "any maskable"
   }
+ ],
+ "shortcuts": [
+  {
+   "name": "Начал смену",
+   "short_name": "Начал",
+   "url": "./?do=start",
+   "icons": [
+    {
+     "src": "sc-start.png",
+     "sizes": "96x96",
+     "type": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "Закончил смену",
+   "short_name": "Закончил",
+   "url": "./?do=stop",
+   "icons": [
+    {
+     "src": "sc-stop.png",
+     "sizes": "96x96",
+     "type": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "Внести смену",
+   "short_name": "Внести",
+   "url": "./?do=log",
+   "icons": [
+    {
+     "src": "sc-log.png",
+     "sizes": "96x96",
+     "type": "image/png"
+    }
+   ]
+  },
+  {
+   "name": "Сверить деньги",
+   "short_name": "Сверить",
+   "url": "./?do=money",
+   "icons": [
+    {
+     "src": "sc-money.png",
+     "sizes": "96x96",
+     "type": "image/png"
+    }
+   ]
+  }
  ]
 }

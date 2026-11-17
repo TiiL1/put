@@ -7,6 +7,7 @@ const Draw = (() => {
   // ---------------------------------------------------------------- иконки (24×24, линией; flame, bolt, star залиты)
   const ICONS = {
     play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+    unlock: '<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 7.7-1.6"/>',
     pause: '<path d="M9 5.5v13M15 5.5v13"/>',
     share: '<path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v6.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V12"/>',
     book: '<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>',
@@ -97,8 +98,8 @@ const Draw = (() => {
     const m = target / 1e6, lab = q => { const v = m * q / 4; return (Math.round(v * 100) / 100).toString().replace('.', ','); };
     const labs = [0, 1, 2, 3, 4].map(q => { const [x, y] = pt(67.5 * q, 157); return `<text class="g-lab${q / 4 <= p + 1e-9 ? ' on' : ''}" x="${f1(x)}" y="${f1(y)}" text-anchor="middle" dominant-baseline="central">${lab(q)}${q === 4 ? ' млн' : ''}</text>`; }).join('');
     const [ex, ey] = pt(270 * p, R), [sx, sy] = pt(0, R);
-    const val = p > 0.004 ? `<path d="${arc(270 * p, R)}" fill="none" stroke="#5FE59A" stroke-opacity=".55" stroke-width="18" stroke-linecap="round" filter="url(#gGlow)"/>
-      <path d="${arc(270 * p, R)}" fill="none" stroke="url(#gArc)" stroke-width="16" stroke-linecap="round"/>` : '';
+    const val = p > 0.004 ? `<path class="g-val" pathLength="1" d="${arc(270 * p, R)}" fill="none" stroke="#5FE59A" stroke-opacity=".55" stroke-width="18" stroke-linecap="round" filter="url(#gGlow)"/>
+      <path class="g-val" pathLength="1" d="${arc(270 * p, R)}" fill="none" stroke="url(#gArc)" stroke-width="16" stroke-linecap="round"/>` : '';
     return `<svg viewBox="0 0 320 296" aria-hidden="true">
       <defs><linearGradient id="gArc" gradientUnits="userSpaceOnUse" x1="${f1(sx)}" y1="${f1(sy)}" x2="${f1(ex)}" y2="${f1(ey)}"><stop offset="0" stop-color="#1FAE6E"/><stop offset="1" stop-color="#A4F5BF"/></linearGradient>
         <radialGradient id="gFace" cx="50%" cy="42%" r="58%"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".055"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
@@ -107,20 +108,48 @@ const Draw = (() => {
       <g fill="none" stroke-linecap="round">${ticks}</g>
       <path d="${arc(270, R)}" fill="none" stroke="rgba(255,255,255,.075)" stroke-width="16" stroke-linecap="round"/>
       ${val}
-      <circle cx="${f1(ex)}" cy="${f1(ey)}" r="12" fill="#3DDC91" fill-opacity=".22"/><circle cx="${f1(ex)}" cy="${f1(ey)}" r="5" fill="#EFFFF5"/>
+      <g class="g-dot"><circle cx="${f1(ex)}" cy="${f1(ey)}" r="12" fill="#3DDC91" fill-opacity=".22"/><circle cx="${f1(ex)}" cy="${f1(ey)}" r="5" fill="#EFFFF5"/></g>
       ${labs}</svg>`;
   }
 
+  // ---------------------------------------------------------------- маленький прибор: дуга 270°, значение 0..1, число внутри
+  function ring(v, color, inner) {
+    const cx = 32, cy = 33, R = 25, p = Math.max(0, Math.min(1, v || 0));
+    const pt = th => { const a = (135 + th) * Math.PI / 180; return [cx + R * Math.cos(a), cy + R * Math.sin(a)]; };
+    const arc = t1 => { const [x0, y0] = pt(0), [x1, y1] = pt(Math.max(0.5, t1)); return `M${f1(x0)} ${f1(y0)}A${R} ${R} 0 ${t1 > 180 ? 1 : 0} 1 ${f1(x1)} ${f1(y1)}`; };
+    return `<svg class="ring" viewBox="0 0 64 60" aria-hidden="true"><path d="${arc(270)}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="6" stroke-linecap="round"/>
+      ${p > 0.004 ? `<path class="ring-v" pathLength="1" d="${arc(270 * p)}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round"/>` : ''}
+      <text x="32" y="34" text-anchor="middle" dominant-baseline="middle" class="ring-t">${inner}</text></svg>`;
+  }
+
+  // ---------------------------------------------------------------- наклейки на машину из легендарных сундуков (рисунок 10x10 вокруг нуля)
+  const STICK = {
+    check: '<rect x="-5" y="-5" width="10" height="10" rx="2" fill="#fff"/><path d="M-5 -5h2.5v2.5h-2.5zM0 -5h2.5v2.5H0zM-2.5 -2.5H0V0h-2.5zM2.5 -2.5H5V0H2.5zM-5 0h2.5v2.5h-2.5zM0 0h2.5v2.5H0zM-2.5 2.5H0V5h-2.5zM2.5 2.5H5V5H2.5z" fill="#111"/>',
+    bolt: '<path d="M1.5 -6 -4 1h3.4l-1 5.5L4.6 -1.2H1.2z" fill="#FFD23F" stroke="#7A4B00" stroke-width=".7" stroke-linejoin="round"/>',
+    star: '<path d="M0 -5.6 1.6 -1.8 5.6 -1.6 2.5 1 3.5 5 0 2.8 -3.5 5 -2.5 1 -5.6 -1.6 -1.6 -1.8z" fill="#FFE07A" stroke="#9A6A00" stroke-width=".6" stroke-linejoin="round"/>',
+    flame: '<path d="M0 -6c2.6 2.6 4.6 4.6 4.6 7.4A4.6 4.6 0 0 1 -4.6 1.4c0-1.8 1-3 2-4 .2 1.6 1 2.4 1.8 2.4C-.8 -1.8 -1 -3.8 0 -6z" fill="#FF8A3D" stroke="#7A2E00" stroke-width=".6"/><path d="M0 0c1.2 1 2 2 2 3.2a2 2 0 0 1-4 0c0-1.2.8-2.2 2-3.2z" fill="#FFD23F"/>',
+    snow: '<g stroke="#BFE4FF" stroke-width="1.4" stroke-linecap="round"><path d="M0 -5.5V5.5M-4.8 -2.75 4.8 2.75M-4.8 2.75 4.8 -2.75"/></g><circle r="1.4" fill="#fff"/>',
+    n01: '<rect x="-6" y="-4.5" width="12" height="9" rx="2" fill="#fff" stroke="#222" stroke-width=".7"/><text y="2.6" text-anchor="middle" font-size="7" font-weight="800" fill="#111" font-family="sans-serif">01</text>',
+    flag: '<path d="M-3.5 5.5V-5.5" stroke="#ddd" stroke-width="1"/><path d="M-3.2 -5.2h7.4l-1.6 2.4 1.6 2.4h-7.4z" fill="#3DDC91"/>',
+    crown: '<path d="M-5.4 3.6 -5.6 -3 -2.4 -.4 0 -4.6 2.4 -.4 5.6 -3 5.4 3.6z" fill="#FFC83D" stroke="#7A4B00" stroke-width=".6" stroke-linejoin="round"/>',
+    wings: '<path d="M-1 0C-3 -4 -6 -4 -6.2 -2.2c1.4 0 2.6.6 3 1.4-1.6-.4-3 0-3.2 1.4 1.4-.4 2.8 0 3.4.8L-1 1z" fill="#fff"/><path d="M1 0C3 -4 6 -4 6.2 -2.2c-1.4 0-2.6.6-3 1.4 1.6-.4 3 0 3.2 1.4-1.4-.4-2.8 0-3.4.8L1 1z" fill="#fff"/>',
+    cat: '<path d="M-4.6 -4.8 -2.4 -2.2h4.8l2.2-2.6.4 5.4A4.6 4.6 0 0 1 0 5a4.6 4.6 0 0 1-5-4.4z" fill="#2B2B33" stroke="#9AA3BD" stroke-width=".5"/><circle cx="-1.8" cy=".6" r=".8" fill="#FFD23F"/><circle cx="1.8" cy=".6" r=".8" fill="#FFD23F"/>',
+    key: '<circle cx="-2.6" r="2.6" fill="none" stroke="#FFC83D" stroke-width="1.6"/><path d="M0 0h5.6M3.6 0v2M5 0v1.6" stroke="#FFC83D" stroke-width="1.6" stroke-linecap="round"/>',
+    m4: '<circle r="5.6" fill="#FFC83D" stroke="#7A4B00" stroke-width=".6"/><text y="2.4" text-anchor="middle" font-size="6.4" font-weight="800" fill="#3A2600" font-family="sans-serif">4M</text>',
+  };
+  const sticker = (id, x, y, sc) => STICK[id] ? `<g transform="translate(${x} ${y}) scale(${sc || 1})">${STICK[id]}</g>` : '';
+  const stickerIcon = id => `<svg viewBox="-8 -8 16 16" aria-hidden="true">${STICK[id] || ''}</svg>`;
+
   // ---------------------------------------------------------------- машинка (вид сверху, нос вправо)
-  function carShape(body, shade) {
+  function carShape(body, shade, stk) {
     return `<rect x="-15" y="-8.5" width="30" height="17" rx="6" fill="${body}"/>
       <rect x="-15" y="2.5" width="30" height="6" rx="3" fill="${shade}" opacity=".55"/>
       <rect x="2.6" y="-6.6" width="7.4" height="13.2" rx="2.6" fill="#232A45"/>
       <rect x="-11.6" y="-6" width="5" height="12" rx="2.2" fill="#232A45"/>
-      <rect x="-4.6" y="-3.3" width="5.6" height="6.6" rx="1.5" fill="#FFF6D6" stroke="${shade}" stroke-width=".8"/>
+      ${stk && STICK[stk] ? sticker(stk, -1.8, 0, 0.62) : `<rect x="-4.6" y="-3.3" width="5.6" height="6.6" rx="1.5" fill="#FFF6D6" stroke="${shade}" stroke-width=".8"/>`}
       <circle cx="14.3" cy="-5.6" r="1.6" fill="#FFFCEB"/><circle cx="14.3" cy="5.6" r="1.6" fill="#FFFCEB"/>`;
   }
-  const carIcon = (body, shade) => `<svg viewBox="-26 -15 52 30" aria-hidden="true"><ellipse rx="18" ry="10" cy="3" fill="#000" opacity=".35"/>${carShape(body, shade)}</svg>`;
+  const carIcon = (body, shade, stk) => `<svg viewBox="-26 -15 52 30" aria-hidden="true"><ellipse rx="18" ry="10" cy="3" fill="#000" opacity=".35"/>${carShape(body, shade, stk)}</svg>`;
 
   // ---------------------------------------------------------------- дорога: станции по порядку, машина между пройденной и следующей
   // stations: [{title, sub, icon, state: 'done'|'next'|'todo', goal}], car: {seg, t}, tag: {text, tone} | null
@@ -192,7 +221,7 @@ const Draw = (() => {
       ${st}
       <g transform="translate(${f1(carX)} ${f1(carY)}) rotate(${f1(ang)})">
         <path d="M14 -5 L48 -17 Q55 0 48 17 L14 5 Z" fill="url(#rBeam)"/>
-        <ellipse rx="19" ry="12" cy="2" fill="#000" opacity=".5" filter="url(#rBlur)"/>${carShape(skin.body, skin.shade)}</g>
+        <ellipse rx="19" ry="12" cy="2" fill="#000" opacity=".5" filter="url(#rBlur)"/>${carShape(skin.body, skin.shade, skin.sticker)}</g>
       ${tg}</svg>`;
   }
 
@@ -220,5 +249,5 @@ const Draw = (() => {
     return out;
   }
 
-  return { sprite, ic, hex, medal, gauge, road, carIcon, sparks, tiles };
+  return { sprite, ic, hex, medal, gauge, ring, road, carIcon, sparks, tiles, sticker, stickerIcon, STICK };
 })();
