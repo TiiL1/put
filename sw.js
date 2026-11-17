@@ -1,11 +1,12 @@
 /* Путь к квартире: офлайн. Сначала отдаём из кэша (открывается сразу), в фоне обновляем файлы. */
-const VERSION = 'put-20261117200055';
+const VERSION = 'put-20261117200232';
 const SHELL = ['./', 'index.html', 'styles.css', 'core.js', 'game.js', 'ui.js', 'store.js', 'app.js', 'firebase-config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+  // на tiil1.github.io живут и другие сайты: удаляем только свои старые кэши
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('put-') && k !== VERSION).map(k => caches.delete(k)))).then(() => self.clients.claim()));
 });
 self.addEventListener('fetch', e => {
   const req = e.request;
