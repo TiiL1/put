@@ -35,7 +35,8 @@ const Store = (() => {
   function update(fn, why) {
     if (!state) state = Core.newState();
     fn(state);
-    if (why !== 'seen') { state.updated = Date.now(); state.dev = device; }
+    // updated только растёт, даже если часы другого устройства, с которого взяли данные, спешат
+    if (why !== 'seen') { state.updated = Math.max(Date.now(), (state.updated || 0) + 1); state.dev = device; }
     clearTimeout(saveT);
     saveT = setTimeout(() => ls.set(KEY, JSON.stringify(state)), 120);
     if (why !== 'seen') schedulePush();
@@ -58,7 +59,7 @@ const Store = (() => {
     try { if (CFG && window.indexedDB) indexedDB.deleteDatabase('firestore/put/' + CFG.projectId + '/main'); } catch (e) { /* кэша нет */ }
   }
   window.addEventListener('pagehide', flush);
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { flush(); if (dirty()) pushNow(); } });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') { flush(); if (dirty() && cloud.ref) sync(); } });
 
   // ---------------------------------------------------------------- резервная копия файлом
   function exportFile() {
@@ -73,7 +74,7 @@ const Store = (() => {
   function importText(text) {
     const s = JSON.parse(text);
     if (!s || typeof s !== 'object' || !s.set) throw new Error('Это не файл приложения');
-    replace(Object.assign(s, { updated: Date.now() }), 'import');
+    replace(Object.assign(s, { updated: Math.max(Date.now(), ((state && state.updated) || 0) + 1), dev: device, seen: seenOf(state && state.seen, s.seen) }), 'import');
     schedulePush();
   }
 
@@ -135,52 +136,95 @@ const Store = (() => {
     if (cloud.authMod && cloud.auth) await cloud.authMod.signOut(cloud.auth);
     setStatus('off');
   }
-  // слияние, когда менялись и телефон, и облако: смены, сверки, вехи, задания и отметки объединяются, настройки берём новее
+  const parse = d => { if (!d || typeof d.json !== 'string') return null; try { const s = JSON.parse(d.json); return s && typeof s === 'object' && s.set ? s : null; } catch (e) { return null; } };
+  const hasData = s => !!(s && s.money && s.money.length);
+  const union = (a, b) => Array.from(new Set((a || []).concat(b || [])));
+  // что уже праздновали, только растёт: уровень и награды, увиденные на одном устройстве, не празднуем снова на другом
+  const seenOf = (a, b) => { a = a || {}; b = b || {}; return { level: Math.max(a.level || 1, b.level || 1), badges: union(a.badges, b.badges) }; };
+  const withSeen = next => Object.assign(next, { seen: seenOf(state && state.seen, next.seen) });
+  // слияние, когда менялись и телефон, и облако: смены, сверки, вехи, задания и отметки объединяются, настройки берём новее.
+  // Удалённое (del: путь -> когда удалили) не возвращается с другого устройства, если запись там не правили позже удаления
   function merge(a, b) {
     const newer = (a.updated || 0) >= (b.updated || 0) ? a : b, older = newer === a ? b : a;
-    const out = JSON.parse(JSON.stringify(newer));
-    for (const k of ['shifts', 'over', 'done', 'mood', 'months']) out[k] = Object.assign({}, older[k] || {}, newer[k] || {});
-    const key = m => [m.d, m.t || 0, m.kind || 's', m.add || 0, m.cash || 0, m.otb || 0, m.car || 0, m.loan || 0].join('|'), seen = new Set();
-    out.money = (newer.money || []).concat(older.money || []).filter(m => { const k = key(m); if (seen.has(k)) return false; seen.add(k); return true; }).sort(Core.byDate);
-    const qs = {}; for (const q of (older.quests || []).concat(newer.quests || [])) qs[q.id] = q; out.quests = Object.values(qs);
-    const sa = a.seen || {}, sb = b.seen || {};
-    out.seen = { level: Math.max(sa.level || 1, sb.level || 1), badges: Array.from(new Set((sa.badges || []).concat(sb.badges || []))) };
-    out.updated = Date.now(); out.dev = device;
+    const out = JSON.parse(JSON.stringify(newer)), del = Object.assign({}, older.del);
+    for (const [p, t] of Object.entries(newer.del || {})) del[p] = Math.max(del[p] || 0, +t || 0);
+    // у смен, заданий и конвертов месяца есть своё время правки u (или создания t); у простых отметок судим по последней правке устройства
+    const live = (p, x, s) => !del[p] || (x && typeof x === 'object' ? x.u || x.t || 0 : s.updated || 0) > del[p];
+    for (const k of ['shifts', 'over', 'done', 'mood', 'months']) {
+      out[k] = {};
+      for (const s of [older, newer]) for (const [id, x] of Object.entries(s[k] || {})) if (live(k + '/' + id, x, s)) out[k][id] = x;
+    }
+    const seen = new Set();
+    out.money = (newer.money || []).concat(older.money || []).filter(m => { const k = Core.moneyKey(m); if (seen.has(k) || del['money/' + k]) return false; seen.add(k); return true; }).sort(Core.byDate);
+    const qs = {}; for (const s of [older, newer]) for (const q of s.quests || []) if (live('quests/' + q.id, q, s)) qs[q.id] = q;
+    out.quests = Object.values(qs); out.del = del;
+    out.seen = seenOf(a.seen, b.seen);
+    out.updated = Math.max(Date.now(), (a.updated || 0) + 1, (b.updated || 0) + 1); out.dev = device;
     return out;
   }
-  // первый снимок: чужое новое берём, своё новое отправляем, если менялись оба, сливаем. Дальше слушаем другие устройства
+  // слушаем облако. Решаем только по ответу сервера: кэш на телефоне может быть старым
+  const OFFLINE = 'Нет интернета. Данные сохраняются на телефоне, отправлю, когда появится связь.';
   function attach() {
     const { fs, ref } = cloud;
     if (cloud.unsub) cloud.unsub();
-    cloud.unsub = fs.onSnapshot(ref, snap => {
-      const d = snap.exists() ? snap.data() : null;
-      const remote = d && d.json ? (() => { try { return JSON.parse(d.json); } catch (e) { return null; } })() : null;
-      const ru = remote ? remote.updated || 0 : 0, mine = state && state.money && state.money.length;
-      if (!remote) { if (mine) pushNow(); else setStatus('ok'); return; }
-      if (snap.metadata.hasPendingWrites) return; // наша же запись ещё в пути
-      if (remote.dev === device && state && ru === (state.updated || 0)) { setSynced(ru); setStatus('ok'); return; } // эхо нашей записи
-      const remoteNew = ru > synced, localNew = dirty() && mine;
-      // новый телефон уже заполнен, а в облаке свои данные: спросить, что взять
-      if (remoteNew && localNew && !synced && remote.money && remote.money.length) {
-        const n = Object.keys(remote.shifts || {}).length;
-        if (confirm('В облаке уже есть данные: ' + n + ' ' + Core.plural(n, ['смена', 'смены', 'смен']) + ' и сверки денег. Взять их вместо того, что на этом телефоне? Нажми Отмена, чтобы объединить одно с другим.')) {
-          replace(remote, 'cloud'); setSynced(state.updated || ru); setStatus('ok'); return;
-        }
+    cloud.unsub = fs.onSnapshot(ref, { includeMetadataChanges: true }, snap => {
+      if (snap.metadata.hasPendingWrites) return;
+      if (snap.metadata.fromCache) { if (navigator.onLine === false) setStatus('error', OFFLINE); return; }
+      const remote = snap.exists() ? parse(snap.data()) : null, ru = remote ? remote.updated || 0 : 0;
+      // в облаке то же, что мы уже видели или сами записали
+      if (remote ? ru === synced || (remote.dev === device && state && ru === state.updated) : !hasData(state)) {
+        if (remote && ru !== synced) setSynced(ru);
+        if (dirty() && hasData(state)) schedulePush(); else setStatus('ok');
+        return;
       }
-      if (remoteNew && !localNew) { replace(remote, 'cloud'); setSynced(state.updated || ru); setStatus('ok'); return; }
-      if (remoteNew && localNew) { replace(merge(state, remote), 'cloud'); pushNow(); return; }
-      if (localNew) { pushNow(); return; }
-      setStatus('ok');
-    }, e => setStatus('error', 'Облако не отвечает. Данные сохраняются на телефоне.'));
+      sync();
+    }, () => setStatus('error', 'Облако не отвечает. Данные сохраняются на телефоне.'));
   }
-  function schedulePush() { if (!cloud.ref) return; clearTimeout(pushT); pushT = setTimeout(pushNow, 1500); }
-  function pushNow() {
+  function schedulePush() { if (!cloud.ref) return; clearTimeout(pushT); pushT = setTimeout(sync, 1500); }
+  let busy = false, again = false, joinAs = '', onlineHook = false;
+  // обмен с облаком одной транзакцией: читаем, что там сейчас, и записываем, только если ничего чужого не затрём
+  async function sync() {
     clearTimeout(pushT);
-    if (!cloud.ref || !state || !cloud.fs) return;
-    const up = state.updated || Date.now();
-    setStatus('sync');
-    cloud.fs.setDoc(cloud.ref, { json: JSON.stringify(state), updated: up, dev: device })
-      .then(() => { setSynced(Math.max(synced, up)); setStatus('ok'); }, () => setStatus('error', 'Не сохранилось в облако. На телефоне всё есть.'));
+    if (!cloud.ref || !cloud.fs || !state) return;
+    if (busy) { again = true; return; }
+    if (navigator.onLine === false) {
+      setStatus('error', OFFLINE);
+      if (!onlineHook) { onlineHook = true; window.addEventListener('online', () => { onlineHook = false; sync(); }, { once: true }); }
+      return;
+    }
+    const { fs, ref, db } = cloud;
+    busy = true; again = false; setStatus('sync');
+    let r;
+    try {
+      r = await fs.runTransaction(db, async tx => {
+        const snap = await tx.get(ref), remote = snap.exists() ? parse(snap.data()) : null;
+        const ru = remote ? remote.updated || 0 : 0, u0 = state.updated || 0, mine = hasData(state);
+        let out = state;
+        if (!remote) { if (!mine) return { out, u0, wu: synced }; }
+        else if (ru === synced || (remote.dev === device && ru === u0)) { if (!dirty() || !mine) return { out, u0, wu: ru }; }
+        else if (!dirty() || !mine) return { out: remote, u0, wu: ru };
+        else if (!synced && hasData(remote)) {
+          // этот телефон впервые встречается с облаком, а там уже свои данные: спросить, что взять
+          if (!joinAs) return { ask: remote };
+          if (joinAs === 'take') return { out: remote, u0, wu: ru };
+          // объединить: настройки и старт берём из облака, с телефона добавляем смены, сверки (кроме стартовой) и отметки
+          out = merge(Object.assign({}, state, { updated: 0, money: state.money.filter(m => m.note !== 'старт') }), remote);
+        } else out = merge(state, remote);
+        tx.set(ref, { json: JSON.stringify(out), updated: out.updated || 0, dev: device });
+        return { out, u0, wu: out.updated || 0 };
+      });
+    } catch (e) { busy = false; setStatus('error', 'Не сохранилось в облако. На телефоне всё есть.'); return; }
+    busy = false;
+    if (r.ask) {
+      const n = Object.keys(r.ask.shifts || {}).length;
+      joinAs = confirm('В облаке уже есть данные: ' + n + ' ' + Core.plural(n, ['смена', 'смены', 'смен']) + ' и сверки денег. Взять их вместо того, что на этом телефоне? Нажми Отмена, чтобы объединить одно с другим.') ? 'take' : 'join';
+      sync(); return;
+    }
+    joinAs = '';
+    // пока шёл обмен, на телефоне могли что-то поменять: не теряем и это
+    if (r.out !== state) replace(withSeen(state.updated === r.u0 ? r.out : merge(state, r.out)), 'cloud');
+    setSynced(r.wu);
+    if (again || dirty()) schedulePush(); else setStatus('ok');
   }
 
   function boot() { load(); if (cloud.on) initCloud(false); return state; }

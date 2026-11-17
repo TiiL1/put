@@ -49,6 +49,9 @@ const Core = (() => {
   const isoDiff = (a, b) => Math.round((ms(b) - ms(a)) / 864e5);
   const monday = iso => isoAdd(iso, -dow(iso));
   const byDate = (a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : (a.t || 0) - (b.t || 0);
+  const moneyKey = m => [m.d, m.t || 0, m.kind || 's', m.add || 0, m.cash || 0, m.otb || 0, m.car || 0, m.loan || 0].join('|');
+  // удалить и запомнить когда: при слиянии с другим устройством удалённое не вернётся
+  const forget = (s, path) => { (s.del = s.del || {})[path] = Date.now(); };
   const addYears = (iso, n) => { const y = +iso.slice(0, 4) + n; return iso.slice(5) === '02-29' && dim(y + '-02') < 29 ? y + '-02-28' : y + iso.slice(4); };
 
   // ---------------------------------------------------------------- формат
@@ -86,7 +89,7 @@ const Core = (() => {
   }
   function newState(t) {
     t = t || today();
-    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {} };
+    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {} };
   }
   function migrate(s) {
     if (!s || typeof s !== 'object') return newState();
@@ -102,7 +105,9 @@ const Core = (() => {
     if (!out.months || typeof out.months !== 'object') out.months = {};
     out.set.tpl = (out.set.tpl || DEF.tpl).slice(0, 7).map(x => +x || 0);
     while (out.set.tpl.length < 7) out.set.tpl.push(0);
-    for (const k of ['shifts', 'over', 'done']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
+    for (const k of ['shifts', 'over', 'done', 'del']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
+    // старые копии с целью без даты: день, когда поставил цель, не должен каждый день переезжать на сегодня
+    if (out.set.why && !out.set.whyOn) out.set.whyOn = out.created;
     if (!Array.isArray(out.money)) out.money = [];
     if (!Array.isArray(out.quests)) out.quests = [];
     out.money = out.money.filter(m => m && m.d).sort(byDate);
@@ -558,7 +563,7 @@ const Core = (() => {
       car = (g.phone + g.taxTech / 12 + g.battery + g.repair) * fc + (m && m.loan > 0 ? annuity(g.price * (1 - g.down / 100), g.rate / 100, g.months) : 0);
     }
     if (car > 0) env.splice(1, 0, { key: 'car', title: ph === 'own' ? 'Машина и кредит' : 'Парк и мелочи', v: Math.round(car / 1000) * 1000 });
-    return { mk, pre, own, env, total: env.reduce((s, x) => s + x.v, 0) };
+    return { mk, pre, own, mixed: preDays > 0 && preDays < n, env, total: env.reduce((s, x) => s + x.v, 0) };
   }
   // машины для такси: цены (медианы Kolesa), расход, ремонт и простои как в исследовании 17.11.2026 (cars_model.py, downtime.py)
   const CARS = [
@@ -627,7 +632,7 @@ const Core = (() => {
     plural, money, mln, num1, grp, dateLong, dateShort, monthName, daysText, untilText, DOW, DOWL, MON,
     planHours, phaseOn, phaseOfMonth, monthPlan, keepOf, fuelPerHour, growth, annuity, carValue, startCost, workMonth, project,
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
-    phaseAt, shiftAfter, hasOv, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
+    phaseAt, shiftAfter, hasOv, moneyKey, forget, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,
     milestones, otbYear, phaseNow, PHASES, dayMessage,
   };

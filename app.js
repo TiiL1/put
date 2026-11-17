@@ -19,6 +19,10 @@
   const xpChip = (x, done) => `<span class="xpc${done ? ' done' : ''}">${ic('star')}+${C.grp(x)} XP</span>`;
   const DOW_IN = ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'];
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  // настоящая дата (не 2027-13-01) в разумных годах
+  const validDate = v => { try { return typeof v === 'string' && ISO.test(v) && v >= '2000-01-01' && v <= '2100-12-31' && C.isoAdd(v, 0) === v; } catch (e) { return false; } };
+  // даты, которые можно оставить пустыми
+  const OPT_DATES = ['carFrom', 'gasFrom', 'preFrom', 'preOnceDate'];
   let TODAY = C.today();
   const refresh = () => { TODAY = C.today(); };
   // игрок считается из всех записей: один раз на версию данных и день (иначе каждое нажатие пересчитывает всё по 4 раза)
@@ -668,9 +672,9 @@
     const st = S(), x = st.shifts[d] || {}, plan = C.planHours(st, d);
     sheet(`<div class="sh-t">${cap(C.DOWL[C.dow(d)])}, ${C.dateLong(d)}</div><div class="sh-s">По плану: ${plan > 0 ? workName(st, d).toLowerCase() + ' ' + C.num1(plan) + ' ч' : 'выходной'}</div>
       <div class="quick">${[0, 4, 6, 8, 10, 12, 13, 14, 15, 16].map(h => `<button class="q${x.h != null && +x.h === h ? ' sel' : ''}${h === plan && plan > 0 ? ' plan' : ''}" data-a="pick-h" data-d="${d}" data-h="${h}">${h}<small>ч</small></button>`).join('')}</div>
-      <label class="fld"><span>Часов</span><input inputmode="decimal" id="f-h" value="${x.h != null ? C.num1(x.h) : ''}" placeholder="${plan || 0}"></label>
-      <div class="fld2"><label class="fld"><span>Заработал за день, ₸</span><input inputmode="numeric" id="f-app" value="${fmtIn(x.app)}" placeholder="сумма"></label>
-        <label class="fld"><span>Заказов</span><input inputmode="numeric" id="f-ord" value="${x.orders || ''}" placeholder="0"></label></div>
+      <label class="fld"><span>Часов</span><input inputmode="decimal" id="f-h" value="${x.h != null ? C.num1(+x.h || 0) : ''}" placeholder="${plan || 0}"></label>
+      <div class="fld2"><label class="fld"><span>Заработал за день, ₸</span><input inputmode="numeric" id="f-app" value="${fmtIn(+x.app || 0)}" placeholder="сумма"></label>
+        <label class="fld"><span>Заказов</span><input inputmode="numeric" id="f-ord" value="${+x.orders || ''}" placeholder="0"></label></div>
       <div class="preview" id="f-pv"></div>
       <div class="btns"><button class="btn" data-a="save-log" data-d="${d}">${ic('check')}Сохранить</button></div>
       ${st.shifts[d] ? `<button class="btn danger" data-a="del-log" data-d="${d}">${ic('trash')}Удалить запись</button>` : ''}`);
@@ -692,7 +696,7 @@
       <div class="btns"><button class="btn" data-a="save-money">${ic('check')}Сохранить</button></div>`);
   }
   function otbSheet() {
-    sheet(`<div class="sh-t">В Отбасы</div><div class="sh-s">Перевод с карты на депозит: активы не меняются, деньги уже работают на премию. +1 XP за каждые 1 000 ₸.</div>
+    sheet(`<div class="sh-t">В Отбасы</div><div class="sh-s">Перевод с карты на депозит: активы не меняются, деньги уже работают на премию. +${1 + G.rk(S(), 'piggy')} XP за каждые 1 000 ₸.</div>
       <label class="fld"><span>Сколько, ₸</span><input inputmode="numeric" id="f-amt" autofocus></label>
       <label class="fld"><span>Заметка</span><input id="f-note" maxlength="80" placeholder="необязательно"></label>
       <div class="btns"><button class="btn" data-a="save-otb">${ic('check')}Сохранить</button></div>`);
@@ -702,7 +706,7 @@
     sheet(`<div class="sh-t">Конверты: ${C.MON[+mk.slice(5) - 1]} ${mk.slice(0, 4)}</div><div class="sh-s">Сколько готов выделить в этом месяце. Заработок смен заполняет их по очереди, остальное идёт на квартиру. Записывать траты не надо.</div>
       ${C.ENV.map(k => { const e = mn.env.find(x => x.key === k); return `<label class="fld"><span>${C.ENV_TITLE[k]}, ₸</span><input inputmode="numeric" id="f-env-${k}" value="${fmtIn(e ? e.v : 0)}"></label>`; }).join('')}
       ${mn.env.some(x => x.key === 'car') ? `<div class="sub">Ещё ${C.money(mn.env.find(x => x.key === 'car').v)} на машину и кредит: их считает расчёт.</div>` : ''}
-      <label class="fld sw"><span>Сделать обычными для всех месяцев</span><input type="checkbox" id="f-env-all"></label>
+      ${mn.mixed ? '<div class="sub">В этом месяце начинается такси: дни до первой смены по конвертам до такси, после по конвертам такси. Обычные суммы меняются в настройках.</div>' : '<label class="fld sw"><span>Сделать обычными для всех месяцев</span><input type="checkbox" id="f-env-all"></label>'}
       <div class="btns"><button class="btn" data-a="save-month" data-v="${mk}">${ic('check')}Сохранить</button></div>
       ${ov ? `<button class="btn ghost" data-a="clear-month" data-v="${mk}">Как обычно</button>` : ''}`);
   }
@@ -726,25 +730,35 @@
   }
 
   // ---------------------------------------------------------------- тосты, опыт, праздник
-  let toastT = null;
-  function toast(text, tone) {
-    const t = $('#toast'); t.className = 'toast ' + (tone || ''); t.textContent = text; t.hidden = false;
+  // одно действие может дать несколько сообщений (похвала, сундук, рекорд): показываем их по очереди
+  let toastT = null, toastL = [];
+  const toast = (text, tone) => toasts([[text, tone]]);
+  function toasts(list) { toastL = list.filter(x => x && x[0]); clearTimeout(toastT); nextToast(); }
+  function nextToast() {
+    const t = $('#toast'), x = toastL.shift();
+    if (!x) { t.classList.remove('on'); toastT = setTimeout(() => { t.hidden = true; }, 260); return; }
+    t.className = 'toast ' + (x[1] || ''); t.textContent = x[0]; t.hidden = false;
     requestAnimationFrame(() => t.classList.add('on'));
-    clearTimeout(toastT); toastT = setTimeout(() => { t.classList.remove('on'); setTimeout(() => { t.hidden = true; }, 260); }, 3600);
+    toastT = setTimeout(nextToast, toastL.length ? 2600 : 3600);
   }
   const buzz = p => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* нет вибро */ } };
   // снимок опыта до действия: после него видно, что нового (сундук, босс, рекорд, месяц оплачен)
-  function snap() { const pl = playerOf(S(), C.today()); return { xp: pl.xp, keys: new Set(pl.ledger.map(e => e.kind + '|' + e.d + '|' + e.text)) }; }
-  function after(before) {
-    const pl = playerOf(S(), C.today()), fresh = pl.ledger.filter(e => !before.keys.has(e.kind + '|' + e.d + '|' + e.text));
+  // месяц оплачен и босс празднуются раз в месяц, даже если правка смены сдвинула день
+  const evKey = e => e.kind === 'paid' || e.kind === 'boss' ? e.kind + '|' + e.d.slice(0, 7) : e.kind + '|' + e.d + '|' + e.text;
+  function snap() { const pl = playerOf(S(), C.today()); return { xp: pl.xp, keys: new Set(pl.ledger.map(evKey)) }; }
+  // msgs: сообщения самого действия, к ним добавятся сундук, рекорд и плитка
+  function after(before, msgs) {
+    const pl = playerOf(S(), C.today()), fresh = pl.ledger.filter(e => !before.keys.has(evKey(e)));
+    msgs = (msgs || []).slice();
     popXp(pl.xp - before.xp);
     for (const e of fresh) {
       if (e.kind === 'boss') fxQueue.push({ kind: 'event', art: D.medal('trophy', 'gold', false, 120), k: 'Босс побеждён', t: esc(e.text.replace('Босс побеждён: ', '')), s: 'План месяца по часам закрыт. +' + C.grp(e.xp) + ' XP.' });
       if (e.kind === 'paid') fxQueue.push({ kind: 'event', art: D.medal('wallet', 'green', false, 120), k: 'Месяц оплачен', t: esc(e.text), s: 'Жильё, еда и всё остальное покрыты заработком. Дальше каждая смена на квартиру.' });
-      if (e.kind === 'chest') toast('Сундук дня открыт: +' + C.grp(e.xp) + ' XP', 'good');
-      if (e.kind === 'record') toast(e.text.replace(/^Рекорд/, 'Новый рекорд'), 'good');
-      if (e.kind === 'tile') toast('Новая плитка квартиры: ' + e.text.replace('Плитка квартиры ', '') + ' собрано', 'good');
+      if (e.kind === 'chest') msgs.push(['Сундук дня открыт: +' + C.grp(e.xp) + ' XP', 'good']);
+      if (e.kind === 'record') msgs.push([e.text.replace(/^Рекорд/, 'Новый рекорд'), 'good']);
+      if (e.kind === 'tile') msgs.push(['Новая плитка квартиры: ' + e.text.replace('Плитка квартиры ', '') + ' собрано', 'good']);
     }
+    if (msgs.length) toasts(msgs);
     celebrate();
   }
   function popXp(n) {
@@ -789,11 +803,11 @@
   // ---------------------------------------------------------------- действия
   function logShift(d, h, app, orders) {
     const before = snap();
-    Store.update(s => { const x = s.shifts[d] || {}; x.h = h; if (app != null) x.app = app; if (orders != null) x.orders = orders; s.shifts[d] = x; }, 'log');
+    // t: когда смену записали впервые (сверка в тот же день раньше неё её не включает), u: когда правили последний раз
+    Store.update(s => { const x = s.shifts[d] || {}, now = Date.now(); x.h = h; if (app != null) x.app = app; if (orders != null) x.orders = orders; x.t = x.t || now; x.u = now; s.shifts[d] = x; }, 'log');
     const st = S(), p = praiseOf(st, d, C.forecast(st, TODAY));
-    if (p) toast(p.title + '. ' + p.text, p.tone === 'warn' ? 'warn' : 'good');
     buzz(p && p.tone === 'good' ? [12, 40, 12] : 10);
-    after(before);
+    after(before, p ? [[p.title + '. ' + p.text, p.tone === 'warn' ? 'warn' : 'good']] : []);
   }
   const clearDraft = () => { UI.dh = null; UI.dapp = ''; UI.dord = ''; };
   function act(a, el) {
@@ -818,63 +832,65 @@
         const hv = parseNum($('#f-h').value), h = hv == null ? C.planHours(S(), d) : hv, app = num0($('#f-app').value), ord = num0($('#f-ord').value);
         closeSheet(); clearDraft(); logShift(d, Math.max(0, Math.min(24, h)), app > 0 ? app : 0, ord > 0 ? Math.round(ord) : 0); break;
       }
-      case 'del-log': Store.update(s => { delete s.shifts[d]; }, 'log'); clearDraft(); closeSheet(); toast('Запись удалена'); break;
+      case 'del-log': Store.update(s => { delete s.shifts[d]; C.forget(s, 'shifts/' + d); }, 'log'); clearDraft(); closeSheet(); toast('Запись удалена'); break;
       case 'set-plan': Store.update(s => { s.over[d] = +el.dataset.h; }, 'plan'); toast(+el.dataset.h ? `План на ${C.dateShort(d)}: ${el.dataset.h} ч` : `${C.dateShort(d)}: выходной`); break;
-      case 'clear-plan': Store.update(s => { delete s.over[d]; }, 'plan'); break;
+      case 'clear-plan': Store.update(s => { delete s.over[d]; C.forget(s, 'over/' + d); }, 'plan'); break;
       case 'tpl': tplSheet(+el.dataset.i, el.dataset.k || 'tpl'); break;
       case 'set-tpl': Store.update(s => { const k = el.dataset.k === 'preTpl' ? 'preTpl' : 'tpl'; s.set[k] = (s.set[k] || [0, 0, 0, 0, 0, 0, 0]).slice(); s.set[k][+el.dataset.i] = +el.dataset.h; }, 'tpl'); closeSheet(); break;
-      case 'mood': { const before = snap(); Store.update(s => { s.mood = s.mood || {}; s.mood[TODAY] = +el.dataset.v; }, 'mood'); toast(+el.dataset.v <= 2 ? 'Записал. Береги себя: сон и еда сейчас важнее лишнего часа.' : 'Записал. Хорошей смены.'); after(before); break; }
+      case 'mood': { const before = snap(); Store.update(s => { s.mood = s.mood || {}; s.mood[TODAY] = +el.dataset.v; }, 'mood'); after(before, [[+el.dataset.v <= 2 ? 'Записал. Береги себя: сон и еда сейчас важнее лишнего часа.' : 'Записал. Хорошей смены.']]); break; }
       case 'month': monthSheet(el.dataset.v); break;
       case 'save-month': {
         const mk = el.dataset.v, e = {}; C.ENV.forEach(k => { e[k] = Math.max(0, num0($('#f-env-' + k).value)); });
-        const all = $('#f-env-all').checked, before = snap();
+        const all = !!($('#f-env-all') || {}).checked, before = snap();
         Store.update(s => {
           s.months = s.months || {};
-          if (all) { const pre = C.monthNeed(s, mk).pre, key = pre ? 'envPre' : 'env', f = C.growth(s.set, mk)[0]; s.set[key] = {}; C.ENV.forEach(k => { s.set[key][k] = Math.round(e[k] / f / 1000) * 1000; }); s.set.living = C.envSum(s.set.env); s.set.preLiving = C.envSum(s.set.envPre); delete s.months[mk]; }
-          else s.months[mk] = e;
+          // обычные конверты хранятся в ценах начала пути: делим на рост цен до этого месяца без округления, чтобы месяц показал ровно введённое
+          if (all) { const pre = C.monthNeed(s, mk).pre, key = pre ? 'envPre' : 'env', f = C.growth(s.set, mk)[0]; s.set[key] = {}; C.ENV.forEach(k => { s.set[key][k] = Math.round(e[k] / f); }); s.set.living = C.envSum(s.set.env); s.set.preLiving = C.envSum(s.set.envPre); if (s.months[mk]) { delete s.months[mk]; C.forget(s, 'months/' + mk); } }
+          else s.months[mk] = Object.assign({}, e, { u: Date.now() });
         }, 'month');
-        closeSheet(); toast('Конверты сохранены: ' + C.money(C.envSum(e)) + ' в месяц'); after(before); break;
+        closeSheet(); after(before, [['Конверты сохранены: ' + C.money(C.envSum(e)) + ' в месяц']]); break;
       }
-      case 'clear-month': Store.update(s => { if (s.months) delete s.months[el.dataset.v]; }, 'month'); closeSheet(); break;
+      case 'clear-month': Store.update(s => { if (s.months && s.months[el.dataset.v]) { delete s.months[el.dataset.v]; C.forget(s, 'months/' + el.dataset.v); } }, 'month'); closeSheet(); break;
       case 'otb-add': otbSheet(); break;
       case 'money-edit': moneySheet(); break;
       case 'save-otb': {
         const amt = num0($('#f-amt').value); if (!(amt > 0)) { closeSheet(); break; }
         const note = $('#f-note').value.trim(), before = snap();
         Store.update(s => { s.money.push({ d: TODAY, kind: 'add', move: true, add: amt, to: 'otb', note, t: Date.now() }); s.money.sort(C.byDate); if (!s.base) s.base = C.makeBase(s, TODAY); }, 'money');
-        closeSheet(); toast(`${C.money(amt)} в Отбасы. Премия 20% за ${TODAY.slice(0, 4)} год придёт в марте ${+TODAY.slice(0, 4) + 1}.`, 'good'); buzz([12, 40, 12]); after(before); break;
+        closeSheet(); buzz([12, 40, 12]); after(before, [[`${C.money(amt)} в Отбасы. Премия 20% за ${TODAY.slice(0, 4)} год придёт в марте ${+TODAY.slice(0, 4) + 1}.`, 'good']]); break;
       }
       case 'save-money': {
         const v = k => num0($('#f-' + k).value), raw = $('#f-d').value || TODAY, day = ISO.test(raw) && raw <= TODAY ? raw : TODAY, before = snap();
         Store.update(s => {
           const prev = s.money.find(x => x.d === day && !C.isAdd(x)), n = { d: day, cash: v('cash'), otb: v('otb'), car: v('car'), loan: v('loan'), t: Date.now() };
           if (prev && prev.note) n.note = prev.note;
+          if (prev) C.forget(s, 'money/' + C.moneyKey(prev));
           s.money = s.money.filter(x => x !== prev); s.money.push(n); s.money.sort(C.byDate);
           if (!s.base) s.base = C.makeBase(s, day);
         }, 'money');
-        closeSheet(); toast('Сверено. Активы: ' + C.money((C.estimate(S(), TODAY) || { na: 0 }).na)); after(before); break;
+        closeSheet(); after(before, [['Сверено. Активы: ' + C.money((C.estimate(S(), TODAY) || { na: 0 }).na)]]); break;
       }
       case 'done': {
         const id = el.dataset.id, before = snap();
-        Store.update(s => { if (s.done[id]) delete s.done[id]; else s.done[id] = TODAY; }, 'done');
-        if (S().done[id]) { toast('Веха пройдена.', 'good'); buzz([12, 40, 12]); after(before); }
+        Store.update(s => { if (s.done[id]) { delete s.done[id]; C.forget(s, 'done/' + id); } else s.done[id] = TODAY; }, 'done');
+        if (S().done[id]) { buzz([12, 40, 12]); after(before, [['Веха пройдена.', 'good']]); }
         break;
       }
       case 'own-done': {
         const id = el.dataset.id, before = snap();
-        Store.update(s => { const q = s.quests.find(x => x.id === id); if (q) q.done = q.done ? null : TODAY; }, 'done');
+        Store.update(s => { const q = s.quests.find(x => x.id === id); if (q) { q.done = q.done ? null : TODAY; q.u = Date.now(); } }, 'done');
         const q = S().quests.find(x => x.id === id);
-        if (q && q.done) { toast('Задание сделано.', 'good'); after(before); }
+        if (q && q.done) after(before, [['Задание сделано.', 'good']]);
         break;
       }
       case 'quest-new': questSheet(); break;
       case 'quest-save': {
         const t = $('#f-qt').value.trim(), qd = $('#f-qd').value;
         if (!t) { $('#f-qt').focus(); break; }
-        Store.update(s => { s.quests.push({ id: 'q' + Date.now().toString(36), title: t.slice(0, 80), date: ISO.test(qd) ? qd : '' }); }, 'quest');
+        Store.update(s => { s.quests.push({ id: 'q' + Date.now().toString(36), title: t.slice(0, 80), date: validDate(qd) ? qd : '', u: Date.now() }); }, 'quest');
         closeSheet(); toast('Задание добавлено'); break;
       }
-      case 'quest-del': if (confirm('Удалить задание?')) Store.update(s => { s.quests = s.quests.filter(x => x.id !== el.dataset.id); }, 'quest'); break;
+      case 'quest-del': if (confirm('Удалить задание?')) Store.update(s => { s.quests = s.quests.filter(x => x.id !== el.dataset.id); C.forget(s, 'quests/' + el.dataset.id); }, 'quest'); break;
       case 'all-done': UI.allDone = true; render(); break;
       case 'badge': badgeSheet(el.dataset.id); break;
       case 'skin': {
@@ -900,7 +916,7 @@
         if (!confirm(`Записать установку газа за ${C.money(g.gasCost)}? С сегодняшнего дня расчёт считает топливо по газу.`)) break;
         const before = snap();
         Store.update(s => { s.set.fuel = 'gas'; s.set.gasFrom = TODAY; s.done.gas = TODAY; s.money.push({ d: TODAY, kind: 'add', add: -s.set.gasCost, to: 'cash', note: 'газ (ГБО)', t: Date.now() }); s.money.sort(C.byDate); }, 'set');
-        toast('Газ стоит. Топливо дешевле, прогноз пересчитан.', 'good'); after(before); break;
+        after(before, [['Газ стоит. Топливо дешевле, прогноз пересчитан.', 'good']]); break;
       }
       case 'fx-next': nextFx(); break;
       case 'sub': UI.sub = el.dataset.v; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
@@ -914,7 +930,8 @@
       case 'sheet-close': closeSheet(); break;
       case 'ob-back': readFields(document); readOb(); UI.onb = Math.max(0, UI.onb - 1); render(); break;
       case 'ob-next': {
-        readFields(document); readOb();
+        const rf = readFields(document); readOb();
+        if (rf.why) { rf.bad.forEach(showField); toast(rf.why, 'warn'); break; }
         if (UI.onb < 2) { UI.onb++; render(); window.scrollTo(0, 0); break; }
         Store.update(s => { s.money = [{ d: TODAY, cash: OB.cash || 0, otb: OB.otb || 0, car: OB.car || 0, loan: OB.loan || 0, note: 'старт', t: Date.now() }]; s.base = C.makeBase(s, TODAY); s.created = TODAY; }, 'start');
         // награды и уровень на старте не празднуем: они уже есть
@@ -926,22 +943,45 @@
     }
   }
   function readOb() { document.querySelectorAll('[data-ob]').forEach(i => { OB[i.dataset.ob] = num0(i.value); }); }
-  // поля настроек сохраняются без перерисовки экрана, чтобы не сбивать ввод в соседнем поле
+  // поля настроек сохраняются без перерисовки экрана, чтобы не сбивать ввод в соседнем поле.
+  // Возвращает, сколько полей записано, и почему не записаны остальные (bad: эти поля)
   function readFields(root) {
-    const fs = root.querySelectorAll('[data-f]');
-    if (!fs.length) return;
+    const res = { n: 0, why: '', bad: [] }, put = [];
+    root.querySelectorAll('[data-f]').forEach(i => {
+      const k = i.dataset.f, no = why => { res.why = res.why || why; res.bad.push(i); };
+      let v;
+      if (i.type === 'checkbox') v = i.checked;
+      else if (i.type === 'date') {
+        if (i.value && !validDate(i.value)) return no('Такой даты нет');
+        v = i.value || (OPT_DATES.indexOf(k) >= 0 ? '' : null);
+        if (v === null) return no('Эту дату нельзя оставить пустой');
+      } else if (i.dataset.t === 'text') v = i.value.trim().slice(0, 120);
+      else {
+        v = parseNum(i.value);
+        if (v == null) return no('Пустое поле не сохраняю: впиши 0');
+        if (k === 'target' && v < 100000) return no('Цель от 100 000 ₸');
+        if (i.dataset.t === 'money' && k !== 'target') v = Math.max(0, v);
+        if (k === 'down') v = Math.min(100, Math.max(0, v));
+        if (k === 'l100') v = Math.max(0, v);
+      }
+      put.push([k, v]);
+    });
+    if (!put.length) return res;
     Store.update(s => {
-      fs.forEach(i => {
-        const k = i.dataset.f, path = k.split('.');
-        let v;
-        if (i.type === 'checkbox') v = i.checked;
-        else if (i.type === 'date') { if (i.value && !ISO.test(i.value)) return; v = i.value || (['carFrom', 'gasFrom', 'preFrom', 'preOnceDate'].indexOf(k) >= 0 ? '' : null); if (v === null) return; }
-        else if (i.dataset.t === 'text') { v = i.value.trim().slice(0, 120); if (k === 'why' && v && !s.set.why) s.set.whyOn = TODAY; }
-        else { v = parseNum(i.value); if (v == null) return; if (k === 'target' && v < 100000) return; if (i.dataset.t === 'money' && k !== 'target') v = Math.max(0, v); }
+      for (const [k, v] of put) {
+        const path = k.split('.');
+        if (k === 'why' && v && !s.set.why) s.set.whyOn = TODAY;
         if (path.length === 2) { s.set[path[0]] = Object.assign({}, s.set[path[0]] || {}); s.set[path[0]][path[1]] = v; } else s.set[k] = v;
-      });
+      }
       s.set.living = C.envSum(s.set.env); s.set.preLiving = C.envSum(s.set.envPre);
     }, 'field');
+    res.n = put.length;
+    return res;
+  }
+  // вернуть в поле то, что сохранено
+  function showField(i) {
+    const v = getF(S().set, i.dataset.f);
+    i.value = i.type === 'date' ? v || '' : i.dataset.t === 'money' ? fmtIn(v) : String(v == null ? '' : v).replace('.', ',');
   }
   // личная ссылка: #s=<base64url JSON> подставляет настройки и задания до первого запуска и стирается из адреса
   function applySetup() {
@@ -950,16 +990,25 @@
     try {
       const b = atob(mm[1].replace(/-/g, '+').replace(/_/g, '/'));
       const over = JSON.parse(new TextDecoder().decode(Uint8Array.from(b, c => c.charCodeAt(0))));
-      const dates = ['deadline', 'otbOpen', 'license', 'taxiFrom', 'carFrom', 'preFrom', 'preOnceDate', 'gasFrom'];
+      const dates = ['deadline', 'otbOpen', 'license', 'taxiFrom', 'carFrom', 'preFrom', 'preOnceDate', 'gasFrom', 'whyOn'];
+      // те же проверки, что в настройках: битое значение пропускаем, остаётся обычное
+      const ok = (k, v) => {
+        if (dates.indexOf(k) >= 0) return validDate(v) || (v === '' && (OPT_DATES.indexOf(k) >= 0 || k === 'whyOn'));
+        if (k === 'start') return /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
+        if (k === 'fuel') return v === 'petrol' || v === 'gas';
+        if (k === 'skin') return G.SKINS.some(x => x.id === v);
+        if (typeof v === 'number') return isFinite(v) && v >= 0 && (k !== 'target' || v >= 100000) && (k !== 'down' || v <= 100);
+        if (typeof v === 'object') return !!v && C.ENV.every(x => typeof v[x] === 'number' && isFinite(v[x]) && v[x] >= 0);
+        return true;
+      };
       if (!S().money.length) Store.update(s => {
         for (const [k, v] of Object.entries(over)) {
-          if (!(k in C.DEF) || Array.isArray(C.DEF[k]) || typeof v !== typeof C.DEF[k]) continue;
-          if (dates.indexOf(k) >= 0 && v !== '' && !ISO.test(v)) continue;
-          if (typeof v === 'object') { if (v && C.ENV.every(x => typeof v[x] === 'number')) s.set[k] = v; continue; }
+          if (!(k in C.DEF) || Array.isArray(C.DEF[k]) || typeof v !== typeof C.DEF[k] || !ok(k, v)) continue;
+          if (typeof v === 'object') { s.set[k] = C.ENV.reduce((o, x) => (o[x] = v[x], o), {}); continue; }
           s.set[k] = typeof v === 'string' ? v.slice(0, 120) : v;
         }
         s.set.living = C.envSum(s.set.env); s.set.preLiving = C.envSum(s.set.envPre);
-        if (Array.isArray(over.quests) && !s.quests.length) s.quests = over.quests.slice(0, 20).filter(q => q && q.title).map((q, i) => ({ id: 'q0' + i, title: String(q.title).slice(0, 80), date: ISO.test(q.date) ? q.date : '' }));
+        if (Array.isArray(over.quests) && !s.quests.length) s.quests = over.quests.slice(0, 20).filter(q => q && typeof q.title === 'string' && q.title.trim()).map((q, i) => ({ id: 'q0' + i, title: q.title.trim().slice(0, 80), date: validDate(q.date) ? q.date : '' }));
       }, 'setup');
     } catch (e) { /* битая ссылка: настройки как есть */ }
     const h = location.hash.replace(/[#&]s=[\w-]+/, '').replace(/^&/, '#');
@@ -987,10 +1036,15 @@
   document.addEventListener('change', e => {
     const el = e.target;
     if (el.dataset && el.dataset.a === 'import' && el.files && el.files[0]) {
-      el.files[0].text().then(t => { try { Store.importText(t); toast('Копия загружена', 'good'); } catch (err) { toast('Не получилось: это не файл копии', 'warn'); } });
+      const f = el.files[0]; el.value = ''; // тот же файл можно выбрать снова
+      if (!confirm('Заменить все данные на этом телефоне' + (Store.cloud.user ? ' и в облаке' : '') + ' копией из файла? Сейчас на телефоне смен: ' + Object.keys(S().shifts).length + '.')) return;
+      f.text().then(t => { try { Store.importText(t); toast('Копия загружена', 'good'); } catch (err) { toast('Не получилось: это не файл копии', 'warn'); } });
       return;
     }
-    if (el.dataset && el.dataset.f && !document.body.classList.contains('onboarding')) { readFields(el.closest('.fld') || el.parentElement); toast('Сохранено'); }
+    if (el.dataset && el.dataset.f && !document.body.classList.contains('onboarding')) {
+      const r = readFields(el.closest('.fld') || el.parentElement);
+      if (r.why) { r.bad.forEach(showField); toast(r.why, 'warn'); } else if (r.n) toast('Сохранено');
+    }
   });
   document.addEventListener('focusin', e => { const el = e.target; if (el.tagName === 'INPUT' && el.inputMode === 'numeric' && el.value) el.select(); });
   document.addEventListener('input', e => {
