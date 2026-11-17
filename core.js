@@ -89,7 +89,7 @@ const Core = (() => {
   }
   function newState(t) {
     t = t || today();
-    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {} };
+    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {}, car: null };
   }
   function migrate(s) {
     if (!s || typeof s !== 'object') return newState();
@@ -111,6 +111,8 @@ const Core = (() => {
     if (!Array.isArray(out.money)) out.money = [];
     if (!Array.isArray(out.quests)) out.quests = [];
     out.money = out.money.filter(m => m && m.d).sort(byDate);
+    if (!out.car || typeof out.car !== 'object' || !out.car.on || !(out.car.price > 0)) out.car = null;
+    applyCar(out);
     out.v = 1;
     return out;
   }
@@ -123,13 +125,14 @@ const Core = (() => {
     return 0;
   }
   function phaseOn(g, iso) {
-    if (g.carFrom && iso >= g.carFrom) return 'own';
-    if (g.taxiFrom && iso >= g.taxiFrom) return 'rent';
-    return 'pre';
+    if (!g.taxiFrom || iso < g.taxiFrom) return 'pre';
+    return g.carFrom && iso >= g.carFrom ? 'own' : 'rent';
   }
   // фаза дня по факту: своя машина, только когда она есть (в сверке или отмечена веха), иначе ещё аренда
   function phaseAt(st, iso) {
     const ph = phaseOn(st.set, iso);
+    // записанная своя машина: с даты покупки (если такси уже началось)
+    if (st.car && st.car.on) return ph === 'pre' ? 'pre' : iso >= st.car.on ? 'own' : 'rent';
     if (ph !== 'own') return ph;
     const m = lastMoney(st, iso);
     return (m && (m.car || 0) > 0) || (st.done && st.done.car && st.done.car <= iso) ? 'own' : 'rent';
@@ -137,9 +140,8 @@ const Core = (() => {
   // фаза месяца: своя машина с месяца покупки; аренда, если смены такси начинаются в этом месяце (дни до них считаются отдельно)
   function phaseOfMonth(g, mk) {
     const last = mk + '-' + pad(dim(mk));
-    if (g.carFrom && mkOf(g.carFrom) <= mk) return 'own';
-    if (g.taxiFrom && g.taxiFrom <= last) return 'rent';
-    return 'pre';
+    if (!g.taxiFrom || g.taxiFrom > last) return 'pre';
+    return g.carFrom && mkOf(g.carFrom) <= mk ? 'own' : 'rent';
   }
   // жизнь за месяц: свой план месяца (st.months), если задан, иначе обычные конверты с ростом цен
   const hasOv = ov => !!ov && ENV.some(k => ov[k] != null);
@@ -177,6 +179,71 @@ const Core = (() => {
 
   // ---------------------------------------------------------------- помесячный прогноз
   const annuity = (L, r, n) => r ? L * r / (1 - Math.pow(1 + r, -n)) : L / n;
+  // ---------------------------------------------------------------- своя машина и кредит за неё
+  // st.car: {name, on (дата покупки), price, v36 (цена продажи через 3 года), loan: {sum, pay, months, first} или null, mt (t сверки при покупке), u}.
+  // Досрочное гашение: запись денег {kind: 'add', move: true, to: 'loan', add, mode: 'term' (меньше срок) или 'pay' (меньше платёж)}
+  const addMonths = (iso, n) => { const mk = mkAdd(mkOf(iso), n); return mk + '-' + pad(Math.min(+iso.slice(8), dim(mk))); };
+  // месячная ставка по сумме, платежу и сроку: подбираем, пока аннуитет не совпадёт с платежом
+  function loanRate(sum, pay, n) {
+    if (!(sum > 0) || !(pay > 0) || !(n > 0) || pay * n <= sum) return 0;
+    let lo = 0, hi = 0.5;
+    for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (annuity(sum, mid, n) > pay) hi = mid; else lo = mid; }
+    return (lo + hi) / 2;
+  }
+  // планировщик берёт цену, срок и ставку записанной машины, чтобы старые формулы считали её, а не шаблон
+  function applyCar(s) {
+    const c = s.car, g = s.set;
+    if (!c || !g) return s;
+    g.price = c.price; g.v36 = c.v36 > 0 ? Math.min(c.v36, c.price) : Math.round(c.price * 0.75); g.carFrom = c.on;
+    const L = c.loan;
+    if (L && L.sum > 0 && L.pay > 0 && L.months > 0) { g.down = Math.max(0, Math.min(100, (1 - L.sum / c.price) * 100)); g.months = L.months; g.rate = loanRate(L.sum, L.pay, L.months) * 100; }
+    else g.down = 100;
+    return s;
+  }
+  // кредит по графику на дату iso: платёж раз в месяц со дня первого платежа, досрочные гашения из записей денег.
+  // Сверка после записи машины с остатком кредита сильнее графика: дальше он идёт от неё
+  function loanPlan(st, iso) {
+    const c = st.car, L = c && c.loan;
+    if (!L || !(L.sum > 0) || !(L.pay > 0) || !(L.months > 0)) return null;
+    const r = loanRate(L.sum, L.pay, L.months), first = L.first || addMonths(c.on, 1);
+    const due = k => addMonths(first, k);
+    const ev = st.money.filter(x => x.d >= c.on && (isAdd(x) ? x.move && x.to === 'loan' : x.loan != null && (x.t || 0) !== (c.mt || -1) && (x.t || 0) >= (c.mt || 0))).sort(byDate);
+    let bal = L.sum, pay = L.pay, k = 0, j = 0, intPaid = 0, paid = 0, extra = 0, closed = null;
+    const apply = x => {
+      if (isAdd(x)) {
+        const a = Math.min(bal, Math.max(0, +x.add || 0)); bal -= a; extra += a; paid += a;
+        if (x.mode === 'pay' && bal > 0.5 && L.months - k > 0) pay = annuity(bal, r, L.months - k);
+      } else bal = Math.max(0, +x.loan || 0);
+      if (bal < 0.5 && !closed) { bal = 0; closed = x.d; }
+    };
+    while (bal > 0.5 && k < 600) {
+      const d = due(k);
+      while (j < ev.length && ev[j].d < d && ev[j].d <= iso) apply(ev[j++]);
+      if (bal <= 0.5 || d > iso) break;
+      const it = bal * r, p = Math.min(pay, bal + it);
+      bal += it - p; intPaid += it; paid += p; k++;
+      if (bal < 0.5) { bal = 0; closed = closed || d; }
+    }
+    while (j < ev.length && ev[j].d <= iso) apply(ev[j++]);
+    // дальше по графику: сколько платежей осталось и сколько процентов впереди
+    let b = bal, kk = k, intLeft = 0;
+    while (b > 0.5 && kk < 600) { const it = b * r, p = Math.min(pay, b + it); if (p <= it) { kk = 600; break; } b += it - p; intLeft += it; kk++; }
+    return { r, rate: r * 1200, sum: L.sum, pay, bal, paid, intPaid, extra, closed, next: bal > 0.5 ? due(k) : null, left: kk - k, end: bal > 0.5 ? due(kk - 1) : closed,
+      intLeft, end0: due(L.months - 1), int0: Math.max(0, L.pay * L.months - L.sum) };
+  }
+  // как изменится кредит после досрочного гашения: для подсказки до сохранения
+  function payoffPreview(st, iso, add, mode) {
+    const now = loanPlan(st, iso);
+    if (!now || !(add > 0)) return { now, next: now };
+    const t = Object.assign({}, st, { money: st.money.concat([{ d: iso, kind: 'add', move: true, to: 'loan', add, mode, t: Date.now() }]) });
+    return { now, next: loanPlan(t, iso) };
+  }
+  // примерная цена своей машины на дату: от цены покупки к цене через 3 года по прямой
+  function carNow(st, iso) {
+    const c = st.car; if (!c) return 0;
+    const v36 = c.v36 > 0 ? Math.min(c.v36, c.price) : c.price * 0.75, months = Math.max(0, isoDiff(c.on, iso)) / 30.44;
+    return Math.max(0, Math.round(c.price - (c.price - v36) * months / 36));
+  }
   const carValue = (g, age) => Math.max(0, g.price - (g.price - g.v36) * age / 36);
   const startCost = g => g.price * g.down / 100 + g.ogpo + g.osgop + g.regFee + g.diag;
 
@@ -203,8 +270,8 @@ const Core = (() => {
   // s0: {iso, cash, otb, car, loan, owned, carAge, yc, yi, carry, pend}; o: {R, extraWeek, months, plan, events}
   function project(st, s0, o) {
     o = o || {};
-    const g = st.set, R = o.R || g.R, r = g.rate / 100, out = [];
-    const pay = annuity(g.price * (1 - g.down / 100), r, g.months);
+    const g = st.set, R = o.R || g.R, r = s0.r != null ? s0.r : g.rate / 100, out = [];
+    const pay = s0.pay != null ? s0.pay : annuity(g.price * (1 - g.down / 100), r, g.months);
     let cash = s0.cash || 0, otb = s0.otb || 0, loan = s0.loan || 0, owned = !!s0.owned, age = s0.carAge || 0;
     let carV = owned ? (s0.car != null ? s0.car : carValue(g, age)) : 0;
     let yc = s0.yc || 0, yi = s0.yi || 0, carry = s0.carry || 0, pend = s0.pend || 0;
@@ -293,12 +360,13 @@ const Core = (() => {
     if (!(g.preOnce > 0) || !g.preOnceDate) return st.money;
     return st.money.concat([{ d: g.preOnceDate, kind: 'add', add: -g.preOnce, to: 'cash', t: -1, plan: true, note: 'разовые траты до такси' }]).sort(byDate);
   }
+  // переводы (move): с денег в Отбасы или в досрочное гашение кредита, активы не меняются
   function addsSince(st, m, iso) {
-    const r = { cash: 0, otb: 0 };
+    const r = { cash: 0, otb: 0, loan: 0 };
     for (const x of entries(st)) {
       if (!isAdd(x) || x.d > iso || !after(x, m)) continue;
       const a = +x.add || 0;
-      if (x.move) { r.cash -= a; r.otb += a; } else r[x.to === 'otb' ? 'otb' : 'cash'] += a;
+      if (x.move) { r.cash -= a; if (x.to === 'loan') r.loan -= a; else r.otb += a; } else r[x.to === 'otb' ? 'otb' : 'cash'] += a;
     }
     return r;
   }
@@ -370,9 +438,14 @@ const Core = (() => {
     if (ph === 'pre') return lifeOf(st, mk, true) / n;
     const extra = ph === 'rent' ? g.rentOther : g.phone + g.taxTech / 12 + g.battery + g.repair;
     let v = (lifeOf(st, mk, false) + extra * fc) / n;
-    if (ph === 'own' && m && (m.car || 0) > 0) v += ((m.loan || 0) * g.rate / 100 + Math.max(0, g.price - g.v36) / 36) / n;
+    if (ph === 'own' && m && (m.car || 0) > 0) {
+      const lp = st.car && st.car.loan ? loanPlan(st, iso) : null;
+      v += ((lp ? lp.bal * lp.r : (m.loan || 0) * g.rate / 100) + Math.max(0, g.price - g.v36) / 36) / n;
+    }
     return v;
   }
+  // из них износ машины за день: в оценке он уменьшает цену машины, а не деньги
+  const dayDep = (st, iso, m) => phaseAt(st, iso) === 'own' && m && (m.car || 0) > 0 ? Math.max(0, st.set.price - st.set.v36) / 36 / dim(mkOf(iso)) : 0;
   // оценка активов на сегодня: последняя отметка + смены после неё − постоянные расходы.
   // Считаем только до последней внесённой смены: дни без записей не тянут оценку вниз.
   // смена после сверки: позже по дате или в тот же день, но внесена позже
@@ -383,7 +456,7 @@ const Core = (() => {
     const cache = new Map();
     let lastLog = null;
     for (const [d, x] of Object.entries(st.shifts)) if (d <= iso && shiftAfter(d, x, m) && (!lastLog || d > lastLog)) lastLog = d;
-    let add = 0, logged = 0, missed = 0;
+    let add = 0, dep = 0, logged = 0, missed = 0;
     for (let d = isoAdd(m.d, 1); d < iso; d = isoAdd(d, 1)) {
       const x = st.shifts[d];
       if (!x && planHours(st, d) > 0) missed++;
@@ -392,11 +465,11 @@ const Core = (() => {
       for (let d = m.d; d <= lastLog; d = isoAdd(d, 1)) {
         const x = st.shifts[d];
         if (x && x.h > 0 && shiftAfter(d, x, m)) { add += dayMoney(st, d, +x.h, +x.app || 0, cache).net; logged++; }
-        if (d > m.d) add -= dayFixed(st, d, m);
+        if (d > m.d) { add -= dayFixed(st, d, m); dep += dayDep(st, d, m); }
       }
     }
     const ad = addsSince(st, m, iso);
-    return { base: m, na: naOf(m) + add + ad.cash + ad.otb, add, adds: ad, logged, missed, from: m.d, to: lastLog || m.d, todayIn: lastLog === iso };
+    return { base: m, na: naOf(m) + add + ad.cash + ad.otb - ad.loan, add, dep, adds: ad, logged, missed, from: m.d, to: lastLog || m.d, todayIn: lastLog === iso };
   }
 
   // старт прогноза с сегодняшнего дня по последней отметке
@@ -407,9 +480,11 @@ const Core = (() => {
     const from = est && est.todayIn ? isoAdd(iso, 1) : iso;
     const owned = (m.car || 0) > 0;
     const carAge = owned && g.carFrom && g.carFrom <= from ? mkDiff(mkOf(g.carFrom), mkOf(from)) : 0;
-    const ob = otbState(st, from), ad = est ? est.adds : { cash: 0, otb: 0 };
-    const cash = (m.cash || 0) + (est ? est.add : 0) + ad.cash;
-    return { iso: from, cash, otb: (m.otb || 0) + ad.otb, car: m.car || 0, loan: m.loan || 0, owned, carAge, yc: ob.yc, yi: 0, carry: ob.carry, pend: ob.pend };
+    const ob = otbState(st, from), ad = est ? est.adds : { cash: 0, otb: 0, loan: 0 }, dep = est ? est.dep || 0 : 0;
+    // кредит по графику на сегодня; платежи по нему с последней сверки ушли из денег (активы те же)
+    const lp = st.car && st.car.loan && owned ? loanPlan(st, iso) : null, loan = lp ? lp.bal : Math.max(0, (m.loan || 0) + (ad.loan || 0));
+    const cash = (m.cash || 0) + (est ? est.add : 0) + dep + ad.cash - (ad.loan || 0) - ((m.loan || 0) - loan);
+    return { iso: from, cash, otb: (m.otb || 0) + ad.otb, car: Math.max(0, (m.car || 0) - dep), loan, owned, carAge, yc: ob.yc, yi: 0, carry: ob.carry, pend: ob.pend, pay: lp ? lp.pay : null, r: lp ? lp.r : null };
   }
 
   // ---------------------------------------------------------------- прогноз, план и отставание
@@ -560,7 +635,8 @@ const Core = (() => {
     if (ph === 'rent') car = g.rentOther * fc * tf;
     if (ph === 'own') {
       const m = lastMoney(st, last);
-      car = (g.phone + g.taxTech / 12 + g.battery + g.repair) * fc + (m && m.loan > 0 ? annuity(g.price * (1 - g.down / 100), g.rate / 100, g.months) : 0);
+      const lp = st.car && st.car.loan ? loanPlan(st, mk + '-01') : null;
+      car = (g.phone + g.taxTech / 12 + g.battery + g.repair) * fc + (lp ? (lp.bal > 0 ? lp.pay : 0) : m && m.loan > 0 ? annuity(g.price * (1 - g.down / 100), g.rate / 100, g.months) : 0);
     }
     if (car > 0) env.splice(1, 0, { key: 'car', title: ph === 'own' ? 'Машина и кредит' : 'Парк и мелочи', v: Math.round(car / 1000) * 1000 });
     return { mk, pre, own, mixed: preDays > 0 && preDays < n, env, total: env.reduce((s, x) => s + x.v, 0) };
@@ -631,6 +707,7 @@ const Core = (() => {
     DEF, datesFrom, newState, migrate, today, isoAdd, isoDiff, mkOf, mkAdd, mkDiff, dim, dow, monday, addYears, pad,
     plural, money, mln, num1, grp, dateLong, dateShort, monthName, daysText, untilText, DOW, DOWL, MON,
     planHours, phaseOn, phaseOfMonth, monthPlan, keepOf, fuelPerHour, growth, annuity, carValue, startCost, workMonth, project,
+    addMonths, loanRate, applyCar, loanPlan, payoffPreview, carNow,
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
     phaseAt, shiftAfter, hasOv, moneyKey, forget, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,

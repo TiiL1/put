@@ -158,6 +158,9 @@ const Store = (() => {
     out.money = (newer.money || []).concat(older.money || []).filter(m => { const k = Core.moneyKey(m); if (seen.has(k) || del['money/' + k]) return false; seen.add(k); return true; }).sort(Core.byDate);
     const qs = {}; for (const s of [older, newer]) for (const q of s.quests || []) if (live('quests/' + q.id, q, s)) qs[q.id] = q;
     out.quests = Object.values(qs); out.del = del;
+    // своя машина: берём ту, что правили позже; удалённая не возвращается
+    const cars = [a.car, b.car].filter(c => c && c.on && (c.u || 0) > (del.car || 0)).sort((x, y) => (x.u || 0) - (y.u || 0));
+    out.car = cars.length ? cars[cars.length - 1] : null;
     out.seen = seenOf(a.seen, b.seen);
     out.updated = Math.max(Date.now(), (a.updated || 0) + 1, (b.updated || 0) + 1); out.dev = device;
     return out;
@@ -207,8 +210,8 @@ const Store = (() => {
           // этот телефон впервые встречается с облаком, а там уже свои данные: спросить, что взять
           if (!joinAs) return { ask: remote };
           if (joinAs === 'take') return { out: remote, u0, wu: ru };
-          // объединить: настройки и старт берём из облака, с телефона добавляем смены, сверки (кроме стартовой) и отметки
-          out = merge(Object.assign({}, state, { updated: 0, money: state.money.filter(m => m.note !== 'старт') }), remote);
+          // объединить: настройки и старт берём из облака, с телефона добавляем смены, сверки и отметки (пустую стартовую сверку не берём)
+          out = merge(Object.assign({}, state, { updated: 0, money: state.money.filter(m => !(m.note === 'старт' && !m.cash && !m.otb && !m.car && !m.loan)) }), remote);
         } else out = merge(state, remote);
         tx.set(ref, { json: JSON.stringify(out), updated: out.updated || 0, dev: device });
         return { out, u0, wu: out.updated || 0 };

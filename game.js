@@ -112,6 +112,7 @@ const Game = (() => {
   one('goal', 'Деньги', 'house', 'gold', 'Цель', 'Активы дошли до цели', 5000, c => c.target, c => c.naMax);
   one('otb-full', 'Деньги', 'bank', 'blue', 'Полная премия', 'За год в Отбасы 200 МРП', 800, c => c.cap, c => c.otbYearMax);
   one('own-car', 'Машина', 'car', 'yellow', 'Своя машина', 'Машина в активах по сверке денег', 500);
+  one('early-1', 'Машина', 'bolt', 'green', 'Досрочка', 'Погаси часть кредита за машину досрочно', 200);
   one('debt-free', 'Машина', 'key', 'gold', 'Без долгов', 'Кредит за машину закрыт', 1500);
   series('rec', 'Рекорды', 'trophy', [[1, 100, 'Первый рекорд'], [10, 500, '10 рекордов']], c => c.recs.length, k => 'Побей свой рекорд ' + k + ' раз');
   series('boss', 'Боссы', 'trophy', [[1, 300, 'Первый босс'], [3, 600, 'Гроза боссов'], [12, 2000, 'Год без поражений']], c => c.bosses.length, k => 'Победи ' + pl(k, ['босса', 'боссов', 'боссов']) + ' месяца');
@@ -229,6 +230,7 @@ const Game = (() => {
       const m = p.x;
       if (C.isAdd(m)) {
         if (m.to === 'otb' && m.add > 0) { mark('save-1', m.d); c.saved += +m.add; for (const t of [100000, 500000, 1000000]) if (c.saved >= t) mark('saved-' + t, m.d); }
+        if (m.to === 'loan' && m.move && m.add > 0) mark('early-1', m.d);
       } else {
         if ((m.car || 0) > 0) mark('own-car', m.d);
         if ((m.loan || 0) > 0) hadLoan = true; else if (hadLoan && (m.car || 0) > 0) mark('debt-free', m.d);
@@ -246,6 +248,8 @@ const Game = (() => {
       if (tileV > 0) { const k = Math.min(XP.tiles, Math.floor(Math.max(0, p.na) / tileV)); for (let j = top + 1; j <= k; j++) c.tiles.push({ d: p.d, j }); top = Math.max(top, k); }
     }
     c.tileN = top; c.line = line;
+    // кредит за записанную машину закрыт по графику или досрочно
+    const lpc = C.loanPlan(st, iso); if (lpc && lpc.closed) mark('debt-free', lpc.closed);
     const ownDone = (st.quests || []).filter(q => q.done && q.done <= iso).map(q => q.done).sort();
     c.ownDone = ownDone.length;
     mark('ownq-5', ownDone[4]);
@@ -279,6 +283,8 @@ const Game = (() => {
     for (const d of c.rests) push(d, XP.rest + 50 * rk(st, 'breath', d), 'rest', 'Восстановление');
     for (const d of Object.keys(st.mood || {})) if (d <= iso) push(d, XP.mood + 5 * rk(st, 'mode', d), 'mood', 'Отметка: как ты');
     for (const p of c.line) if (C.isAdd(p.x) && p.x.to === 'otb' && p.x.add > 0) push(p.d, Math.floor(p.x.add / 1000) * (XP.per1000 + rk(st, 'piggy', p.d)), 'save', 'В Отбасы ' + C.money(+p.x.add));
+    // досрочное гашение тоже приближает цель: меньше процентов
+    for (const p of c.line) if (C.isAdd(p.x) && p.x.move && p.x.to === 'loan' && p.x.add > 0) push(p.d, Math.floor(p.x.add / 1000) * (XP.per1000 + rk(st, 'piggy', p.d)), 'save', 'Досрочно по кредиту ' + C.money(+p.x.add));
     for (const t of c.tiles) push(t.d, XP.tile + 50 * rk(st, 'builder', t.d), 'tile', 'Плитка квартиры ' + t.j + ' из ' + XP.tiles);
     for (const [id, d] of Object.entries(st.done || {})) if (questXp(id) && d) push(d > iso ? iso : d, questXp(id), 'quest', 'Веха: ' + questTitle(id));
     for (const q of st.quests || []) if (q.done && q.done <= iso) push(q.done, XP.own, 'quest', 'Задание: ' + q.title);
@@ -379,6 +385,12 @@ const Game = (() => {
     return { tone: 'warn', text: 'Батарейка почти пустая. За рулём уставшим опасно: возьми выходной.' + (frz ? ' Заморозка сохранит серию.' : '') };
   }
 
-  return { XP, QUEST_XP, questXp, questTitle, cum, levelOf, RANKS, rankOf, SKINS, skinOf, BADGES, PERKS, pointsOf, rk, context, ledger, player, preview, shiftXp, quests, comboOf, bossName, energyTip };
+  // опыт с учётом изученных навыков на день d: для подписей и подсказок, те же формулы, что в ledger
+  const xpOf = (st, d) => Object.assign({}, XP, {
+    app: XP.app + 5 * rk(st, 'books', d), ordersDay: XP.ordersDay + 15 * rk(st, 'hunter', d), paid: XP.paid + 50 * rk(st, 'econ', d),
+    boss: XP.boss + 125 * rk(st, 'boss', d), rest: XP.rest + 50 * rk(st, 'breath', d), mood: XP.mood + 5 * rk(st, 'mode', d),
+    per1000: XP.per1000 + rk(st, 'piggy', d), tile: XP.tile + 50 * rk(st, 'builder', d), comboStep: XP.comboStep + 0.01 * rk(st, 'combo', d),
+  });
+  return { XP, xpOf, QUEST_XP, questXp, questTitle, cum, levelOf, RANKS, rankOf, SKINS, skinOf, BADGES, PERKS, pointsOf, rk, context, ledger, player, preview, shiftXp, quests, comboOf, bossName, energyTip };
 })();
 if (typeof module !== 'undefined') module.exports = Game;
