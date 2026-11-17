@@ -21,6 +21,13 @@
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
   let TODAY = C.today();
   const refresh = () => { TODAY = C.today(); };
+  // игрок считается из всех записей: один раз на версию данных и день (иначе каждое нажатие пересчитывает всё по 4 раза)
+  let plMemo = null;
+  const playerOf = (st, iso) => {
+    const k = (st.updated || 0) + '|' + iso + '|' + st.money.length + '|' + Object.keys(st.shifts).length;
+    if (plMemo && plMemo.st === st && plMemo.k === k) return plMemo.v;
+    const v = G.player(st, iso, null); plMemo = { st, k, v }; return v;
+  };
 
   // ---------------------------------------------------------------- общие расчёты экрана
   function model() {
@@ -28,13 +35,14 @@
     const est = C.estimate(st, TODAY), na = est ? est.na : 0;
     const need = C.needExtra(st, TODAY), fc = need.fc, vs = C.versusPlan(st, TODAY, na);
     const target = st.set.target > 0 ? st.set.target : 1, pct = Math.max(0, Math.min(1, na / target));
-    const pl = G.player(st, TODAY, fc), rw = C.runway(st, fc, TODAY);
+    const pl = playerOf(st, TODAY), rw = C.runway(st, fc, TODAY);
     return { st, est, na, fc, need, vs, target, pct, pl, rw, pre: !st.set.taxiFrom || TODAY < st.set.taxiFrom, left: Math.max(0, target - na), daysLeft: C.isoDiff(TODAY, st.set.deadline) };
   }
   // впереди или отстаёшь от плана: {tone, icon, text}
   function status(m) {
     const v = m.vs;
     if (!v) return null;
+    if (!m.fc.goal && m.na < m.target) return { tone: 'coral', icon: 'down', text: 'План не доходит до цели' };
     if (v.days == null || Math.abs(v.days) >= 365) {
       if (Math.abs(v.diff) < 5000) return { tone: 'plain', icon: 'check', text: 'Идёшь по плану' };
       return v.diff > 0 ? { tone: 'green', icon: 'up', text: 'Впереди плана на ' + C.money(v.diff) } : { tone: 'coral', icon: 'down', text: 'Отстаёшь от плана на ' + C.money(-v.diff) };
@@ -64,7 +72,7 @@
   function streakPill(pl) {
     const n = pl.streak;
     if (!(n > 0)) return '';
-    return `<button class="streak" data-a="tab" data-tab="me" aria-label="Смен подряд: ${n}${pl.freezes ? ', заморозок: ' + pl.freezes : ''}">${ic('flame')}${n}${pl.freezes ? `<span class="frz">${ic('snow')}${pl.freezes}</span>` : ''}</button>`;
+    return `<button class="streak" data-a="tab" data-tab="me" aria-label="Смен подряд: ${n}${pl.freezes ? ', заморозки серии: ' + pl.freezes : ''}">${ic('flame')}${n}${pl.freezes ? `<span class="frz">${ic('snow')}${pl.freezes}</span>` : ''}</button>`;
   }
   function playerStrip(pl, why) {
     return `<button class="player" data-a="tab" data-tab="me">${D.hex(pl.level, 40)}
@@ -88,7 +96,7 @@
         <div class="g-pct g-left">${m.na >= m.target ? 'цель есть' : 'ещё ' + mlnShort(m.left)}</div></div>
       ${s ? `<div class="status"><span class="chip ${s.tone}">${ic(s.icon)}${esc(s.text)}</span></div>` : ''}
     </section>
-    <div class="tiles2"><div class="tile"><div class="over">За ${C.MON[+TODAY.slice(5, 7) - 1]} со смен</div><b class="${pl.month && pl.month.earned > 0 ? 'up' : ''}">${pl.month && pl.month.earned ? moneyHtml(Math.round(pl.month.earned)) : '0<span class="cur">\u00A0₸</span>'}</b><span>после бензина и аренды</span></div>
+    <div class="tiles2"><div class="tile"><div class="over">За ${C.MON[+TODAY.slice(5, 7) - 1]} со смен</div><b class="${pl.month && pl.month.earned > 0 ? 'up' : ''}">${pl.month && pl.month.earned ? moneyHtml(Math.round(pl.month.earned)) : '0<span class="cur">\u00A0₸</span>'}</b><span>${C.phaseAt(st, TODAY) === 'pre' ? 'на руки с доставки' : C.phaseAt(st, TODAY) === 'rent' ? 'после бензина и аренды' : 'после бензина и ремонта'}</span></div>
       <div class="tile"><div class="over">До срока</div>${m.daysLeft >= 0 ? `<b>${m.daysLeft}<small> ${C.plural(m.daysLeft, ['день', 'дня', 'дней'])}</small></b>` : '<b class="down">прошёл</b>'}<span>${C.dateLong(st.set.deadline)}</span></div></div>
     ${todayCard(m, working)}
     ${yp && !st.shifts[TODAY] ? `<button class="card tap block" data-a="log" data-d="${yest}"><div class="over">Вчера, ${C.num1(yx.h)} ч</div>${praiseBox(yp)}</button>` : ''}
@@ -148,7 +156,7 @@
     if (q.plan > 0) out += row(q.planDone, `План: ${C.num1(q.plan)} ч`, G.XP.planDay);
     out += q.moneyT != null ? row(q.moneyDone, `Заработок от ${C.money(q.moneyT)}`, G.XP.moneyDay) : '<div class="dq dim"><i></i><span>Цель по заработку появится после 3 смен с суммой</span></div>';
     if (q.ordersT != null) out += row(q.ordersDone, `Заказов от ${q.ordersT}`, G.XP.ordersDay);
-    const chest = q.chest ? `<div class="chest on">${ic('chest')}<span>Сундук открыт</span>${xpChip(q.chest)}</div>` : q.avail >= 2 ? `<div class="chest">${ic('chest')}<span>Выполни все задания: сундук 50-150 XP</span></div>` : '';
+    const chest = q.chest ? `<div class="chest on">${ic('chest')}<span>Сундук открыт</span>${xpChip(q.chest)}</div>` : q.avail >= 2 ? `<div class="chest">${ic('chest')}<span>Выполни все задания: сундук 50‑150 XP</span></div>` : '';
     return `<div class="dqs"><div class="over">Задания дня</div>${out}${chest}</div>`;
   }
   function quickHours(iso, plan) {
@@ -158,10 +166,10 @@
       <button class="q own" data-a="log" data-d="${iso}">своё</button></div>`;
   }
   function energyCard(m) {
-    const st = m.st, pl = m.pl, md = st.mood && st.mood[TODAY], e = Math.round(pl.energy), tip = G.energyTip(e);
+    const st = m.st, pl = m.pl, md = st.mood && st.mood[TODAY], e = Math.round(pl.energy), tip = G.energyTip(e, pl.freezes, C.planHours(st, TODAY) === 0);
     const tone = e >= 60 ? 'good' : e >= 30 ? 'mid' : 'low';
     const moods = [[1, 'выжат'], [2, 'устал'], [3, 'норм'], [4, 'бодро'], [5, 'огонь']];
-    return `<section class="card"><div class="between"><div class="over">${md ? 'Энергия' : 'Как ты сегодня?'}</div>${pl.freezes ? `<span class="chip violet">${ic('snow')}заморозок: ${pl.freezes}</span>` : ''}</div>
+    return `<section class="card"><div class="between"><div class="over">${md ? 'Энергия' : 'Как ты сегодня?'}</div>${pl.freezes ? `<span class="chip violet">${ic('snow')}${pl.freezes} ${C.plural(pl.freezes, ['заморозка', 'заморозки', 'заморозок'])} серии</span>` : ''}</div>
       ${md ? '' : `<div class="moods">${moods.map(([v, t]) => `<button class="mood" data-a="mood" data-v="${v}"><b>${v}</b><span>${t}</span></button>`).join('')}</div>`}
       <div class="batt ${tone}"><div class="batt-bar"><i style="width:${Math.max(4, e)}%"></i></div><b>${e}<small> из 100</small></b></div>
       <div class="sub">${esc(tip.text)}${md ? '' : ` Отметка +${G.XP.mood} XP.`}</div></section>`;
@@ -170,11 +178,12 @@
     const rw = m.rw, g = m.st.set;
     if (!rw) return '';
     const okB = rw.at >= rw.need, tone = rw.neg ? 'coral' : okB ? 'green' : 'yellow';
-    const low = rw.neg ? `Деньги кончатся в ${C.MON[+rw.neg.slice(5) - 1].replace(/ь$/, 'е').replace(/й$/, 'е').replace(/т$/, 'те')}: самое тонкое место.` : rw.low < rw.need && rw.lowMk ? `Самое тонкое место: ${C.MON[+rw.lowMk.slice(5) - 1]}, около ${C.money(Math.round(rw.low / 1000) * 1000)}.` : '';
+    const inMon = mk => C.MON[+mk.slice(5) - 1].replace(/ь$/, 'е').replace(/й$/, 'е').replace(/т$/, 'те');
+    const low = rw.neg ? `Деньги кончатся в ${inMon(rw.neg)}.` : rw.low < rw.need && rw.lowMk && rw.lowMk !== C.mkOf(g.taxiFrom) ? `Меньше всего денег будет в ${inMon(rw.lowMk)}: около ${C.money(Math.round(rw.low / 1000) * 1000)}.` : '';
     const fix = rw.short > 0 ? (rw.extraH > 0 && rw.extraH <= 6 ? `Чтобы хватило, добавь <b>${C.num1(Math.ceil(rw.extraH * 2) / 2)} ч доставки в день</b> или урежь конверты месяца.` : 'Одной доставкой не закрыть: урежь жильё (хостел) или конверты месяца.') : 'Запаса хватает на старт такси.';
-    return `<section class="card"><div class="between"><div class="over">Запас к первой смене такси</div><span class="chip ${tone}">${okB ? ic('check') + 'хватает' : ic('down') + 'не хватает ' + C.money(Math.round(rw.short / 1000) * 1000)}</span></div>
+    return `<section class="card"><div class="between"><div class="over">Запас на старт такси</div><span class="chip ${tone}">${okB ? ic('check') + 'хватает' : ic('down') + 'не хватает'}</span></div>
       <div class="fc-date">${moneyHtml(Math.round(rw.at / 1000) * 1000)}</div>
-      <div class="fc-sub">будет на руках к ${C.dateLong(g.taxiFrom)}, нужно на старт около ${C.money(rw.need)}. ${low}</div>
+      <div class="fc-sub">будет на руках к ${C.dateLong(g.taxiFrom)}. Нужно на старт около ${C.money(rw.need)}${rw.short > 0 ? `, не хватает ${C.money(Math.round(rw.short / 1000) * 1000)}` : ''}. ${low}</div>
       <p class="lead">${fix}</p></section>`;
   }
   // конверты месяца: заработок по очереди заполняет жильё, машину, еду, связь и хотелки; дальше всё в цель
@@ -188,10 +197,11 @@
     const sh = Object.keys(st.shifts).filter(d => d <= TODAY && st.shifts[d].h > 0).sort().slice(-10);
     const avg = sh.length ? sh.reduce((s, d) => s + C.dayMoney(st, d, +st.shifts[d].h, +st.shifts[d].app || 0).net, 0) / sh.length : 0;
     const restShifts = avg > 0 ? Math.ceil(Math.max(0, mn.total - earned) / avg) : null;
+    const mpl = C.monthPlan(st, mk, st.shifts[TODAY] ? C.isoAdd(TODAY, 1) : TODAY), leftSh = mpl.sh + mpl.preSh, gap = Math.max(0, mn.total - earned - leftSh * avg);
     const workingMonth = Object.keys(st.shifts).some(d => d.slice(0, 7) === mk) || C.monthPlan(st, mk).h + C.monthPlan(st, mk).preH > 0;
     const msg = paidOn ? `Жизнь на ${C.MON[+mk.slice(5) - 1]} оплачена ${C.dateShort(paidOn)}. Дальше всё на квартиру: уже <b class="up">${C.money(extra, true)}</b>.`
       : !workingMonth ? 'В этом месяце смен нет: жизнь идёт из накоплений.'
-      : `Заработано <b>${C.money(Math.max(0, earned))}</b> из ${C.money(mn.total)} на жизнь.` + (restShifts ? ` Ещё примерно ${restShifts} ${C.plural(restShifts, ['смена', 'смены', 'смен'])} по твоему среднему, потом всё на квартиру.` : '');
+      : `На жизнь уже есть <b>${C.money(Math.max(0, earned))}</b> из ${C.money(mn.total)}.` + (restShifts ? (restShifts <= leftSh ? ` Ещё примерно ${restShifts} ${C.plural(restShifts, ['смена', 'смены', 'смен'])} по твоему среднему, потом всё на квартиру.` : ` По плану до конца месяца ${leftSh} ${C.plural(leftSh, ['смена', 'смены', 'смен'])}: из накоплений уйдёт около ${C.money(Math.round(gap / 1000) * 1000)}.`) : '');
     return `<section class="card"><div class="between"><div class="over">Конверты: ${C.MON[+mk.slice(5) - 1]}</div><button class="link" data-a="month" data-v="${mk}">${ic('edit')}изменить</button></div>
       <div class="env">${segs.map(x => `<div class="env-s${x.f >= 1 ? ' full' : ''}" style="flex:${Math.max(1, x.v)}"><i style="width:${(x.f * 100).toFixed(1)}%"></i></div>`).join('')}${paidOn ? '<div class="env-s goal" style="flex:' + Math.max(1, Math.round(mn.total / 6)) + '"><i style="width:100%"></i></div>' : ''}</div>
       <div class="env-l">${segs.map(x => `<span class="${x.f >= 1 ? 'on' : ''}">${x.f >= 1 ? ic('check') : ''}${esc(x.title)} <b>${C.money(x.v)}</b></span>`).join('')}</div>
@@ -212,7 +222,7 @@
     const next = t.n < t.total ? (t.n + 1) * t.value : null;
     return `<section class="card"><div class="between"><div class="over">Квартира по плиткам</div><span class="chip yellow">${t.n} из ${t.total}</span></div>
       <div class="tiles-wrap">${D.tiles(t.n, t.total, t.start)}</div>
-      <div class="sub">Плитка = ${C.money(t.value)} активов, каждая новая +${G.XP.tile} XP. Загорается при сверке денег${next ? `, следующая от ${C.money(next)}` : ''}.</div></section>`;
+      <div class="sub">Плитка = ${C.money(t.value)} активов, каждая новая +${G.XP.tile} XP. Загорается при сверке денег${next ? `, следующая от ${C.money(next)}` : ''}.</div></section>`;
   }
   // сколько будет к сроку при выручке чуть хуже и чуть лучше: вилка в тенге
   function rangeLine(m) {
@@ -220,13 +230,18 @@
     const lo = at(C.forecast(st, TODAY, { R: R0 * 0.88 })), mid = at(m.fc), hi = at(C.forecast(st, TODAY, { R: R0 * 1.15 }));
     if (lo == null || hi == null) return '';
     const f = v => (v < 0 ? '−' : '') + mlnShort(Math.abs(v));
-    return `<div class="range"><div class="over">К ${C.dateLong(st.set.deadline)} будет</div><div class="range-v"><b class="${lo < 0 ? 'down' : ''}">${f(lo)}</b><span>…</span><b class="up">${f(hi)}</b></div>
+    return `<div class="range"><div class="over">К ${C.dateLong(st.set.deadline)} будет</div><div class="range-v"><span>от</span><b class="${lo < 0 ? 'down' : ''}">${f(lo)}</b><span>до</span><b class="up">${f(hi)}</b></div>
       <div class="sub">По прогнозу ${f(mid)}. Вилка: выручка от ${C.money(Math.round(R0 * 0.88 / 50) * 50)} до ${C.money(Math.round(R0 * 1.15 / 50) * 50)} в час до вычетов.${lo < 0 ? ' Минус значит, что аренда съедает накопления: переходи на свою машину раньше.' : ''}</div></div>`;
   }
   function forecastCard(m) {
     const st = m.st, dl = st.set.deadline;
     if (m.na >= m.target) return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Цель есть</div><div class="fc-sub">${C.money(m.na)} активов. Дальше Отбасы и квартира.</div></section>`;
-    if (!m.fc.goal) return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div>${rangeLine(m)}<div class="fc-sub">При таком плане до ${C.money(m.target)} не дойти: на аренде почти ничего не остаётся, и взнос за свою машину не копится. Помогут меньше трат на жизнь (конверты), машина дешевле, 7 смен в неделю или выручка от 3 400 ₸ в час.</div></section>`;
+    if (!m.fc.goal) {
+      const w = m.fc.warn, ex = m.need.extra;
+      const why = w && st.set.carFrom ? `К ${C.dateLong(st.set.carFrom)} не хватит около ${C.money(Math.round(w.short / 1000) * 1000)} на взнос за свою машину, а на аренде до цели не дойти.` : `При таком плане до ${C.money(m.target)} не дойти.`;
+      const how = ex ? ` С +${C.num1(ex)} ч в неделю машина будет, и к сроку успеваешь.` : ' Помогут меньше трат на жизнь (конверты), машина дешевле или 7 смен в неделю.';
+      return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div><div class="fc-sub">${why}${how}</div>${rangeLine(m)}</section>`;
+    }
     const g = m.fc.goal.iso, diff = C.isoDiff(g, dl), late = diff < 0, span = Math.max(C.isoDiff(TODAY, dl), C.isoDiff(TODAY, g), 1);
     const pf = Math.max(0, Math.min(100, C.isoDiff(TODAY, g) / span * 100)), pd = Math.max(0, Math.min(100, C.isoDiff(TODAY, dl) / span * 100));
     const ex = m.need.extra;
@@ -259,7 +274,7 @@
     return `<button class="card tap block" data-a="tab" data-tab="shifts"><div class="wk-h"><div><div class="over">Эта неделя</div><div class="wk-t">${C.num1(wk.fact)} <span>из ${C.num1(planAll)} ч</span></div></div>
       <div class="wk-m">${wk.app ? `<b>${C.money(wk.app)}</b><span>в приложении</span>` : ''}</div></div>
       ${weekSegs(st, mon)}
-      <div class="wk-foot"><span>${closed ? 'Неделя закрыта' : `До плана недели ещё <b>${C.num1(Math.max(0, planAll - wk.fact))} ч</b>`}</span>${planAll > 0 ? xpChip(G.XP.week, closed) : ''}</div></button>`;
+      <div class="wk-foot"><span>${closed ? 'Неделя закрыта' : `До закрытия недели ещё <b>${C.num1(Math.max(0, planAll - wk.fact))} ч</b>`}</span>${planAll > 0 ? xpChip(G.XP.week, closed) : ''}</div></button>`;
   }
   function questsPreview(m) {
     const Q = G.quests(m.st, TODAY, m.fc).open.slice(0, 3);
@@ -274,9 +289,9 @@
     const list = near.length ? near : pl.badges.filter(b => !b.on).slice(0, 3);
     return `<div class="sec-h"><div class="h3">Ближе всего</div><button class="link" data-a="tab" data-tab="me">${got} из ${pl.badges.length} наград ${ic('right')}</button></div>
       <section class="card">${list.map(b => `<button class="nb" data-a="badge" data-id="${b.id}">${D.medal(b.icon, b.color || 'violet', true, 38)}<div><div class="nb-t"><b>${esc(b.title)}</b>${xpChip(b.xp)}</div>
-        <div class="pbar"><i style="width:${(b.pct * 100).toFixed(1)}%"></i></div><div class="nb-s">${esc(b.hint)}: ${progText(b)}</div></div></button>`).join('')}</section>`;
+        <div class="pbar"><i style="width:${(b.pct * 100).toFixed(1)}%"></i></div><div class="nb-s">${esc(b.hint.split('. ')[0])}: ${progText(b)}</div></div></button>`).join('')}</section>`;
   }
-  const progText = b => b.need >= 10000 ? C.money(b.cur) + ' из ' + C.money(b.need) : C.num1(b.cur) + ' из ' + C.num1(b.need);
+  const progText = b => b.need >= 1e6 ? C.num1(Math.floor(b.cur / 1e4) / 100) + ' из ' + C.num1(b.need / 1e6) + ' млн ₸' : b.need >= 1e4 ? Math.round(b.cur / 1000) + ' из ' + Math.round(b.need / 1000) + ' тыс. ₸' : C.grp(Math.round(b.cur)) + ' из ' + C.grp(b.need);
   function notes(m) {
     const est = m.est;
     let out = '';
@@ -288,7 +303,7 @@
   // ---------------------------------------------------------------- смены
   function vShifts() {
     refresh();
-    const st = S(), fc = C.forecast(st, TODAY), mon = C.isoAdd(C.monday(TODAY), UI.week * 7), pl = G.player(st, TODAY, fc);
+    const st = S(), fc = C.forecast(st, TODAY), mon = C.isoAdd(C.monday(TODAY), UI.week * 7), pl = playerOf(st, TODAY);
     const ds = Array.from({ length: 7 }, (_, i) => C.isoAdd(mon, i));
     if (!UI.sel || UI.sel < mon || UI.sel > ds[6]) { UI.sel = ds.indexOf(TODAY) >= 0 ? TODAY : ds[0]; UI.dh = null; UI.dapp = ''; UI.dord = ''; }
     const wk = C.weekStats(st, mon, fc, TODAY), mk = C.mkOf(UI.week === 0 ? TODAY : mon), mo = C.monthStats(st, mk, fc, TODAY), planAll = weekPlan(st, mon);
@@ -303,7 +318,7 @@
         <div class="top-r"><button class="icon-btn" data-a="week" data-v="-1" aria-label="Неделя назад">${ic('left')}</button><button class="icon-btn" data-a="week" data-v="1" aria-label="Неделя вперёд">${ic('right')}</button></div></div>
       <div class="wk-h"><div class="wk-t">${C.num1(wk.fact)} <span>из ${C.num1(planAll)} ч</span></div><div class="wk-m">${wk.app ? `<b>${C.money(wk.app)}</b><span>заработано</span>` : ''}</div></div>
       <div class="bars">${ds.map(d => barCol(st, d)).join('')}</div>
-      <div class="wk-foot"><span>${closed ? 'Неделя закрыта' : planAll > 0 ? `Неделя закроется на ${C.num1(planAll)} ч` : 'Неделя без плана'}</span>${planAll > 0 ? xpChip(G.XP.week, closed) : ''}</div>
+      <div class="wk-foot"><span>${closed ? 'Неделя закрыта' : planAll > 0 ? `До закрытия недели ещё ${C.num1(Math.max(0, planAll - wk.fact))} ч` : 'Неделя без плана'}</span>${planAll > 0 ? xpChip(G.XP.week, closed) : ''}</div>
     </section>
     ${dayPanel(st, UI.sel, fc)}
     ${UI.week === 0 ? bossCard(pl) : ''}
@@ -348,7 +363,7 @@
     if (d > TODAY) {
       if (!started) return `<section class="card"><div class="over">${esc(head)}</div><p class="lead">Работа начнётся ${st.set.preFrom ? C.dateLong(st.set.preFrom) + ' (подработка)' : C.dateLong(st.set.taxiFrom)}. Даты можно поменять в Профиле, в настройках.</p></section>`;
       return `<section class="card"><div class="today-top"><div class="ibox violet">${ic('cal')}</div><div><div class="over">${esc(head)}</div><div class="today-t">План: ${plan > 0 ? C.num1(plan) + ' ч' : 'выходной'}</div></div></div>
-        <div class="quick">${[0, 6, 8, 10, 12].map(h => `<button class="q${plan === h ? ' sel' : ''}${h ? '' : ' wide'}" data-a="set-plan" data-d="${d}" data-h="${h}">${h ? h + '<small>ч</small>' : 'вых'}</button>`).join('')}</div>
+        <div class="quick">${[0, 6, 8, 10, 11, 12, 13, 14, 15, 16].map(h => `<button class="q${plan === h ? ' sel' : ''}${h ? '' : ' wide'}" data-a="set-plan" data-d="${d}" data-h="${h}">${h ? h + '<small>ч</small>' : 'вых'}</button>`).join('')}</div>
         ${st.over[d] != null ? `<div class="btns"><button class="btn ghost" data-a="clear-plan" data-d="${d}">Как обычно</button></div>` : ''}</section>`;
     }
     if (!started) return `<section class="card"><div class="over">${esc(head)}</div><p class="lead">${st.set.preFrom ? 'Подработка начнётся ' + C.dateLong(st.set.preFrom) : st.set.taxiFrom ? 'Первая смена ' + C.dateLong(st.set.taxiFrom) : 'Дата начала работы не задана'}. Даты можно поменять в Профиле, в настройках.</p></section>`;
@@ -399,7 +414,7 @@
       <ul class="as-list">${parts.map(([n, v, c]) => `<li class="${v < 0 ? 'neg' : ''}"><span><i style="--c:${c}"></i>${n}</span><b>${C.money(v)}</b></li>`).join('')}</ul>
       ${est && (est.add || ad) ? `<div class="as-note">По сверке ${C.dateShort(est.from)}: ${C.money(C.naOf(last))}.${ad ? ` Запланированные траты и переводы после неё: ${C.money(ad, true)}.` : ''}${est.add ? ` Смены за вычетом расходов на жизнь: примерно ${C.money(est.add, true)}.` : ''}</div>` : ''}
       <div class="btns"><button class="btn" data-a="otb-add">${ic('bank')}В Отбасы</button><button class="btn alt" data-a="money-edit">Сверить</button></div>
-      <div class="as-note">Тратить по чекам не надо: жизнь задаётся конвертами месяца. Раз в неделю или месяц нажми Сверить и впиши, сколько есть. Перевод в Отбасы: +1 XP за каждые 1 000 ₸.</div>
+      <div class="as-note">Записывать каждую трату не надо: жизнь задаётся конвертами месяца. Раз в неделю или месяц нажми Сверить и впиши, сколько есть. Перевод в Отбасы: +${1 + G.rk(st, 'piggy')} XP за каждые 1 000 ₸.</div>
     </section>
     ${monthCard(m)}
     ${m.pre ? runwayCard(m) : ''}
@@ -500,7 +515,7 @@
   function vMe() {
     if (UI.sub === 'settings') return vSettings();
     refresh();
-    const st = S(), pl = G.player(st, TODAY, C.forecast(st, TODAY)), rk = pl.rank, c = Store.cloud, x = pl.stats;
+    const st = S(), pl = playerOf(st, TODAY), rk = pl.rank, c = Store.cloud, x = pl.stats;
     const on = pl.badges.filter(b => b.on).length;
     const cloudTxt = c.status === 'ok' ? `В облаке${c.user ? ': ' + esc(c.user.email || '') : ''}. Данные есть на всех устройствах.` : c.status === 'error' ? esc(c.error) : c.status === 'sync' || c.status === 'loading' ? 'Подключаюсь…' : 'Данные только на этом телефоне. Войди через Google, чтобы не потерять их и видеть на других устройствах.';
     const recs = pl.recs.slice().reverse().slice(0, 5);
@@ -514,11 +529,11 @@
       <div class="stat"><b>${C.grp(pl.xp)}</b><span>опыта всего</span></div>
       <div class="stat"><b>${C.grp(Math.round(x.hours))}</b><span>${C.plural(Math.round(x.hours), ['час', 'часа', 'часов'])} работы</span></div>
       <div class="stat"><b>${C.grp(x.shifts)}</b><span>${C.plural(x.shifts, ['смена', 'смены', 'смен'])}</span></div>
-      <div class="stat"><b>${x.best}</b><span>смен подряд, рекорд</span></div>
-      <div class="stat"><b>${x.bosses}</b><span>${C.plural(x.bosses, ['босс', 'босса', 'боссов'])} побеждено</span></div>
+      <div class="stat"><b>${x.best}</b><span>${C.plural(x.best, ['смена подряд', 'смены подряд', 'смен подряд'])}, рекорд</span></div>
+      <div class="stat"><b>${x.bosses}</b><span>${C.plural(x.bosses, ['босс побеждён', 'босса побеждено', 'боссов побеждено'])}</span></div>
       <div class="stat"><b>${on} из ${pl.badges.length}</b><span>наград</span></div></div>
     ${pl.freezes || pl.streak ? `<section class="card"><div class="between"><div><div class="over">Серия</div><div class="h3">${pl.streak} ${C.plural(pl.streak, ['смена', 'смены', 'смен'])} подряд · комбо ×${C.num1(pl.combo)}</div></div><span class="chip violet">${ic('snow')}${pl.freezes} из 2</span></div>
-      <div class="sub">Каждые 14 смен подряд дают заморозку: один пропуск не сбросит серию. Выходные по плану серию не рвут. Комбо добавляет 5% опыта за каждую смену серии, до ×1,5.</div></section>` : ''}
+      <div class="sub">Каждые ${14 - 2 * G.rk(st, 'ice')} смен подряд дают заморозку: один пропуск не сбросит серию. Выходные по плану серию не рвут. Комбо добавляет ${5 + G.rk(st, 'combo')}% опыта за каждую смену серии, до ×1,5.</div></section>` : ''}
     ${attrsCard(pl)}
     ${skillsCard(pl)}
     ${recs.length ? `<div class="sec-h"><div class="h3">Рекорды</div></div><section class="card">${recs.map(r => `<div class="xp-row"><div>${r.kind === 'day' ? 'Заработок за день' : r.kind === 'week' ? 'Часов за неделю' : 'Заработок за месяц'}<small>${C.dateLong(r.d)}</small></div><b>${r.kind === 'week' ? C.num1(r.v) + ' ч' : C.money(r.v)}</b></div>`).join('')}</section>` : ''}
@@ -550,7 +565,7 @@
   function skillsCard(pl) {
     const sk = pl.skills, br = ['Работа', 'Деньги', 'Голова'];
     return `<div class="sec-h"><div class="h3">Навыки</div><span class="chip ${sk.free > 0 ? 'yellow' : 'plain'}">${ic('star')}очков: ${sk.free}</span></div>
-      <section class="card"><div class="sub" style="margin-top:0">Очко навыка даётся за каждые 2 уровня. Ступень действует с дня, когда изучил.</div>
+      <section class="card"><div class="sub" style="margin-top:0">Очко навыка даётся за каждые 2 уровня. Ступень действует со дня, когда ты её изучил.</div>
       ${br.map(b => `<div class="cat-h">${b}</div>${sk.list.filter(x => x.br === b).map(x => `<div class="perk${x.r ? ' on' : ''}"><div class="perk-i">${ic(x.icon)}</div>
         <div class="perk-b"><div class="perk-t"><b>${esc(x.title)}</b><span class="dots">${[0, 1, 2].map(i => `<i class="${i < x.r ? 'on' : ''}"></i>`).join('')}</span></div>
         <div class="perk-s">${x.r ? esc(x.now) : 'Пока не изучен'}${x.r < 3 ? `<br><span class="dim">Дальше: ${esc(x.next)}</span>` : ''}</div></div>
@@ -684,7 +699,7 @@
   }
   function monthSheet(mk) {
     const st = S(), mn = C.monthNeed(st, mk), ov = st.months && st.months[mk];
-    sheet(`<div class="sh-t">Конверты: ${C.MON[+mk.slice(5) - 1]} ${mk.slice(0, 4)}</div><div class="sh-s">Сколько готов выделить в этом месяце. Заработок смен заполняет их по очереди, остальное идёт на квартиру. Тратить по чекам не надо.</div>
+    sheet(`<div class="sh-t">Конверты: ${C.MON[+mk.slice(5) - 1]} ${mk.slice(0, 4)}</div><div class="sh-s">Сколько готов выделить в этом месяце. Заработок смен заполняет их по очереди, остальное идёт на квартиру. Записывать траты не надо.</div>
       ${C.ENV.map(k => { const e = mn.env.find(x => x.key === k); return `<label class="fld"><span>${C.ENV_TITLE[k]}, ₸</span><input inputmode="numeric" id="f-env-${k}" value="${fmtIn(e ? e.v : 0)}"></label>`; }).join('')}
       ${mn.env.some(x => x.key === 'car') ? `<div class="sub">Ещё ${C.money(mn.env.find(x => x.key === 'car').v)} на машину и кредит: их считает расчёт.</div>` : ''}
       <label class="fld sw"><span>Сделать обычными для всех месяцев</span><input type="checkbox" id="f-env-all"></label>
@@ -693,7 +708,7 @@
   }
   function tplSheet(i, key) {
     const cur = +((S().set[key] || [])[i] || 0);
-    sheet(`<div class="sh-t">Обычно ${DOW_IN[i]}</div><div class="sh-s">${key === 'preTpl' ? 'Подработка до такси' : 'Такси'}</div><div class="quick">${[0, 4, 6, 8, 10, 12].map(h => `<button class="q${cur === h ? ' sel' : ''}${h ? '' : ' wide'}" data-a="set-tpl" data-i="${i}" data-k="${key}" data-h="${h}">${h ? h + '<small>ч</small>' : 'вых'}</button>`).join('')}</div>`);
+    sheet(`<div class="sh-t">Обычно ${DOW_IN[i]}</div><div class="sh-s">${key === 'preTpl' ? 'Подработка до такси' : 'Такси'}</div><div class="quick">${[0, 4, 6, 8, 10, 11, 12, 13, 14, 15].map(h => `<button class="q${cur === h ? ' sel' : ''}${h ? '' : ' wide'}" data-a="set-tpl" data-i="${i}" data-k="${key}" data-h="${h}">${h ? h + '<small>ч</small>' : 'вых'}</button>`).join('')}</div>`);
   }
   function questSheet() {
     sheet(`<div class="sh-t">Своё задание</div><div class="sh-s">За выполненное +${G.XP.own} XP</div>
@@ -702,9 +717,9 @@
       <div class="btns"><button class="btn" data-a="quest-save">${ic('plus')}Добавить</button></div>`);
   }
   function badgeSheet(id) {
-    const b = G.player(S(), TODAY, null).badges.find(x => x.id === id); if (!b) return;
+    const b = playerOf(S(), TODAY).badges.find(x => x.id === id); if (!b) return;
     sheet(`<div class="bsh">${D.medal(b.icon, b.color || 'violet', !b.on, 92)}
-      <div class="sh-t" style="margin-top:12px">${esc(b.title)}</div><div class="sh-s">${b.on ? 'Получено ' + C.dateLong(b.on) : esc(b.hint)}</div>
+      <div class="sh-t" style="margin-top:12px">${esc(b.title)}</div><div class="sh-s">${b.on ? 'Получена ' + C.dateLong(b.on) : esc(b.hint)}</div>
       ${b.on ? '' : `<div class="pbar" style="width:100%;margin-top:14px"><i style="width:${(b.pct * 100).toFixed(1)}%"></i></div><div class="sh-s">${progText(b)}</div>`}
       <div style="margin-top:12px">${xpChip(b.xp, !!b.on)}</div></div>
       <div class="btns"><button class="btn alt" data-a="sheet-close">Понятно</button></div>`);
@@ -719,15 +734,15 @@
   }
   const buzz = p => { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) { /* нет вибро */ } };
   // снимок опыта до действия: после него видно, что нового (сундук, босс, рекорд, месяц оплачен)
-  function snap() { const pl = G.player(S(), C.today(), null); return { xp: pl.xp, keys: new Set(pl.ledger.map(e => e.kind + '|' + e.d + '|' + e.text)) }; }
+  function snap() { const pl = playerOf(S(), C.today()); return { xp: pl.xp, keys: new Set(pl.ledger.map(e => e.kind + '|' + e.d + '|' + e.text)) }; }
   function after(before) {
-    const pl = G.player(S(), C.today(), null), fresh = pl.ledger.filter(e => !before.keys.has(e.kind + '|' + e.d + '|' + e.text));
+    const pl = playerOf(S(), C.today()), fresh = pl.ledger.filter(e => !before.keys.has(e.kind + '|' + e.d + '|' + e.text));
     popXp(pl.xp - before.xp);
     for (const e of fresh) {
       if (e.kind === 'boss') fxQueue.push({ kind: 'event', art: D.medal('trophy', 'gold', false, 120), k: 'Босс побеждён', t: esc(e.text.replace('Босс побеждён: ', '')), s: 'План месяца по часам закрыт. +' + C.grp(e.xp) + ' XP.' });
       if (e.kind === 'paid') fxQueue.push({ kind: 'event', art: D.medal('wallet', 'green', false, 120), k: 'Месяц оплачен', t: esc(e.text), s: 'Жильё, еда и всё остальное покрыты заработком. Дальше каждая смена на квартиру.' });
       if (e.kind === 'chest') toast('Сундук дня открыт: +' + C.grp(e.xp) + ' XP', 'good');
-      if (e.kind === 'record') toast('Новый рекорд! ' + e.text, 'good');
+      if (e.kind === 'record') toast(e.text.replace(/^Рекорд/, 'Новый рекорд'), 'good');
       if (e.kind === 'tile') toast('Новая плитка квартиры: ' + e.text.replace('Плитка квартиры ', '') + ' собрано', 'good');
     }
     celebrate();
@@ -741,7 +756,7 @@
   const fxQueue = [];
   function celebrate() {
     const st = S(); if (!st || !st.money.length) return;
-    const pl = G.player(st, C.today(), null), got = pl.badges.filter(b => b.on).map(b => b.id);
+    const pl = playerOf(st, C.today()), got = pl.badges.filter(b => b.on).map(b => b.id);
     if (!st.seen || !Array.isArray(st.seen.badges)) { Store.update(s => { s.seen = { level: pl.level, badges: got }; }, 'seen'); return; }
     const seenB = new Set(st.seen.badges), newB = got.filter(id => !seenB.has(id));
     if (pl.level > st.seen.level) {
@@ -764,7 +779,7 @@
     } else if (f.kind === 'event') {
       art = f.art; k = f.k; t = f.t; s = f.s;
     } else {
-      art = D.medal(f.b.icon, f.b.color || 'violet', false, 120); k = 'Новая награда'; t = esc(f.b.title); s = 'Получено сегодня. +' + C.grp(f.b.xp) + ' XP.';
+      art = D.medal(f.b.icon, f.b.color || 'violet', false, 120); k = 'Новая награда'; t = esc(f.b.title); s = 'Получена ' + (f.b.on === C.today() ? 'сегодня' : C.dateShort(f.b.on)) + '. +' + C.grp(f.b.xp) + ' XP.';
     }
     root.innerHTML = `<div class="fx-b" role="dialog" aria-modal="true"><div class="fx-art">${art}${D.sparks(18)}</div><div class="fx-k">${k}</div><div class="fx-t">${t}</div><div class="fx-s">${s}</div>
       <button class="btn" data-a="fx-next">${fxQueue.length ? 'Дальше' : 'Поехали'}</button></div>`;
@@ -827,7 +842,7 @@
         const amt = num0($('#f-amt').value); if (!(amt > 0)) { closeSheet(); break; }
         const note = $('#f-note').value.trim(), before = snap();
         Store.update(s => { s.money.push({ d: TODAY, kind: 'add', move: true, add: amt, to: 'otb', note, t: Date.now() }); s.money.sort(C.byDate); if (!s.base) s.base = C.makeBase(s, TODAY); }, 'money');
-        closeSheet(); toast(`${C.money(amt)} в Отбасы. Премия 20% от взносов придёт весной.`, 'good'); buzz([12, 40, 12]); after(before); break;
+        closeSheet(); toast(`${C.money(amt)} в Отбасы. Премия 20% за ${TODAY.slice(0, 4)} год придёт в марте ${+TODAY.slice(0, 4) + 1}.`, 'good'); buzz([12, 40, 12]); after(before); break;
       }
       case 'save-money': {
         const v = k => num0($('#f-' + k).value), raw = $('#f-d').value || TODAY, day = ISO.test(raw) && raw <= TODAY ? raw : TODAY, before = snap();
@@ -863,13 +878,13 @@
       case 'all-done': UI.allDone = true; render(); break;
       case 'badge': badgeSheet(el.dataset.id); break;
       case 'skin': {
-        const sk = G.SKINS.find(x => x.id === el.dataset.id), L = G.player(S(), TODAY, null).level;
+        const sk = G.SKINS.find(x => x.id === el.dataset.id), L = playerOf(S(), TODAY).level;
         if (sk && sk.level <= L) Store.update(s => { s.set.skin = sk.id; }, 'set');
         else if (sk) toast(`${sk.name} машина откроется с ${sk.level} уровня`);
         break;
       }
       case 'perk': {
-        const id = el.dataset.id, pl = G.player(S(), TODAY, null), x = pl.skills.list.find(p => p.id === id);
+        const id = el.dataset.id, pl = playerOf(S(), TODAY), x = pl.skills.list.find(p => p.id === id);
         if (!x || !x.can || pl.skills.free <= 0) break;
         Store.update(s => { s.perks = s.perks || {}; s.perks[id] = (s.perks[id] || []).concat([TODAY]).slice(0, 3); }, 'perk');
         toast(`Навык изучен: ${x.title}, ступень ${x.r + 1}. ${x.next}.`, 'good'); buzz([12, 40, 12]); break;
@@ -903,7 +918,7 @@
         if (UI.onb < 2) { UI.onb++; render(); window.scrollTo(0, 0); break; }
         Store.update(s => { s.money = [{ d: TODAY, cash: OB.cash || 0, otb: OB.otb || 0, car: OB.car || 0, loan: OB.loan || 0, note: 'старт', t: Date.now() }]; s.base = C.makeBase(s, TODAY); s.created = TODAY; }, 'start');
         // награды и уровень на старте не празднуем: они уже есть
-        const pl = G.player(S(), TODAY, null);
+        const pl = playerOf(S(), TODAY);
         Store.update(s => { s.seen = { level: pl.level, badges: pl.badges.filter(b => b.on).map(b => b.id) }; }, 'seen');
         UI.tab = 'home'; render(); window.scrollTo(0, 0); fxQueue.push({ kind: 'welcome', level: pl.level, rank: pl.rank.title }); nextFx(); break;
       }

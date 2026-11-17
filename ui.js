@@ -97,7 +97,7 @@ const Draw = (() => {
     return `<svg viewBox="0 0 320 296" aria-hidden="true">
       <defs><linearGradient id="gArc" gradientUnits="userSpaceOnUse" x1="${f1(sx)}" y1="${f1(sy)}" x2="${f1(ex)}" y2="${f1(ey)}"><stop offset="0" stop-color="#1FAE6E"/><stop offset="1" stop-color="#A4F5BF"/></linearGradient>
         <radialGradient id="gFace" cx="50%" cy="42%" r="58%"><stop offset="0" stop-color="#FFFFFF" stop-opacity=".055"/><stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/></radialGradient>
-        <filter id="gGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="8"/></filter></defs>
+        <filter id="gGlow" filterUnits="userSpaceOnUse" x="0" y="0" width="320" height="296"><feGaussianBlur stdDeviation="8"/></filter></defs>
       <circle cx="${cx}" cy="${cy}" r="102" fill="url(#gFace)"/>
       <g fill="none" stroke-linecap="round">${ticks}</g>
       <path d="${arc(270, R)}" fill="none" stroke="rgba(255,255,255,.075)" stroke-width="16" stroke-linecap="round"/>
@@ -145,8 +145,8 @@ const Draw = (() => {
     };
     const trail = path(Math.min(car.seg, segs.length)) + (car.seg < segs.length ? half(cs, ct) : '');
     const st = stations.map((s, k) => {
-      const [x, y] = P[k + 1], below = k % 2 === 0, last = k === N - 1;
-      const ty = below ? 30 : -18, anchor = last ? 'end' : 'middle', tx = last ? -26 : 0;
+      const [x, y] = P[k + 1], below = k === N - 2 || (k % 2 === 0 && k !== N - 3), last = k === N - 1;
+      const ty = below ? 30 : -18, anchor = last ? 'end' : k === 0 ? 'start' : 'middle', tx = last ? -26 : k === 0 ? -14 : 0;
       const lbl = last ? `<text class="lb lb-goal" x="${tx}" y="-22" text-anchor="end">${s.title}</text><text class="lb-sub" x="${tx}" y="-8" text-anchor="end">${s.sub || ''}</text>`
         : `<text class="lb ${s.state === 'done' ? 'lb-done' : s.state === 'next' ? 'lb-next' : ''}" x="${tx}" y="${ty}" text-anchor="${anchor}">${s.title}</text>` +
           (s.sub ? `<text class="lb-sub" x="${tx}" y="${below ? ty + 14 : ty - 13}" text-anchor="${anchor}">${s.state === 'next' ? `<tspan class="lb-y">${s.sub}</tspan>` : s.sub}</text>` : '');
@@ -163,7 +163,7 @@ const Draw = (() => {
         <svg x="${f1(-w / 2 + 7)}" y="-42" width="14" height="14" viewBox="0 0 24 24" class="ic-in" style="color:${ink}"><use href="#i-${tag.tone === 'down' ? 'down' : 'up'}"/></svg>
         <text class="tag" x="${f1(-w / 2 + 25)}" y="-31" fill="${ink}">${tag.text}</text></g>`;
     })() : '';
-    return `<svg class="road" viewBox="0 0 358 200" role="img" aria-label="${stations.map(s => s.title + (s.state === 'done' ? ' пройдено' : '')).join(', ')}">
+    return `<svg class="road" viewBox="0 0 358 216" role="img" aria-label="${stations.map(s => s.title + (s.state === 'done' ? ' пройдено' : '')).join(', ')}">
       <defs>
         <linearGradient id="rTrail" x1="0" x2="1"><stop offset="0" stop-color="#3DDC91" stop-opacity="0"/><stop offset=".3" stop-color="#3DDC91"/><stop offset="1" stop-color="#9DF0B5"/></linearGradient>
         <radialGradient id="rGoal"><stop offset="0" stop-color="#FFC83D" stop-opacity=".5"/><stop offset="1" stop-color="#FFC83D" stop-opacity="0"/></radialGradient>
@@ -172,8 +172,8 @@ const Draw = (() => {
         <filter id="rBlur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>
         <linearGradient id="rHill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".04"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
       </defs>
-      <path d="M0 172 C 70 146, 130 166, 200 154 S 320 128, 358 136 V200 H0 Z" fill="url(#rHill)"/>
-      <path d="M0 190 C 90 174, 170 194, 250 182 S 330 172, 358 176 V200 H0 Z" fill="url(#rHill)"/>
+      <path d="M0 172 C 70 146, 130 166, 200 154 S 320 128, 358 136 V216 H0 Z" fill="url(#rHill)"/>
+      <path d="M0 190 C 90 174, 170 194, 250 182 S 330 172, 358 176 V216 H0 Z" fill="url(#rHill)"/>
       <g fill="#131840"><rect x="298" y="30" width="10" height="34" rx="1.5"/><rect x="310" y="18" width="11" height="46" rx="1.5"/><rect x="323" y="26" width="9" height="38" rx="1.5"/><rect x="346" y="24" width="11" height="40" rx="1.5"/></g>
       <g stroke="#7F89D6" stroke-linecap="round" fill="none" opacity=".75"><path d="M339 62V17" stroke-width="2.4"/><path d="M339 19c-3.6-1.6-5.4-5-5-9.2M339 19c3.6-1.6 5.4-5 5-9.2M339 19V8" stroke-width="1.6"/><path d="M335 62l4-7 4 7" stroke-width="1.6"/></g>
       <circle cx="339" cy="6.6" r="7.5" fill="#FFC83D" opacity=".22"/><circle cx="339" cy="6.6" r="4.4" fill="#FFD36B"/>

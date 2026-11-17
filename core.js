@@ -70,7 +70,7 @@ const Core = (() => {
     const d = isoDiff(from, to);
     if (d === 0) return 'сегодня';
     if (d === 1) return 'завтра';
-    if (d < 0) return 'было ' + Math.abs(d) + NB + plural(-d, ['день', 'дня', 'дней']) + ' назад';
+    if (d < 0) return 'просрочено на ' + Math.abs(d) + NB + plural(-d, ['день', 'дня', 'дней']);
     if (d < 62) return 'через ' + d + NB + plural(d, ['день', 'дня', 'дней']);
     const m = Math.round(d / 30.44);
     return 'через ' + m + NB + plural(m, ['месяц', 'месяца', 'месяцев']);
@@ -81,7 +81,7 @@ const Core = (() => {
   const envSum = e => ENV.reduce((s, k) => s + (+(e && e[k]) || 0), 0);
   // даты пути по умолчанию от первого запуска: подработка через неделю, Отбасы через 2 недели, права через 4 с лишним месяца, своя машина через 5 месяцев такси, срок 3 года
   function datesFrom(t) {
-    const license = isoAdd(t, 130), taxiFrom = isoAdd(license, 4); // курс 2-2,5 месяца и очередь на автодром Астаны (17.11.2026)
+    const license = isoAdd(t, 160), taxiFrom = isoAdd(license, 5); // курс 2-2,5 месяца и очередь на автодром Астаны: права в апреле-июне (17.11.2026)
     return { deadline: addYears(t, 3), otbOpen: isoAdd(t, 13), license, taxiFrom, carFrom: mkAdd(mkOf(taxiFrom), 5) + '-01', preFrom: isoAdd(t, 7), preOnceDate: isoAdd(t, 6) };
   }
   function newState(t) {
@@ -111,8 +111,8 @@ const Core = (() => {
   }
 
   // ---------------------------------------------------------------- план часов и фазы
-  function planHours(st, iso) {
-    const g = st.set, o = st.over && st.over[iso];
+  function planHours(st, iso, noOver) {
+    const g = st.set, o = !noOver && st.over ? st.over[iso] : null;
     if (g.taxiFrom && iso >= g.taxiFrom) return o != null ? +o : +(g.tpl[dow(iso)] || 0);
     if (g.preFrom && iso >= g.preFrom) return o != null ? +o : +((g.preTpl || [])[dow(iso)] || 0);
     return 0;
@@ -122,6 +122,13 @@ const Core = (() => {
     if (g.taxiFrom && iso >= g.taxiFrom) return 'rent';
     return 'pre';
   }
+  // фаза дня по факту: своя машина, только когда она есть (в сверке или отмечена веха), иначе ещё аренда
+  function phaseAt(st, iso) {
+    const ph = phaseOn(st.set, iso);
+    if (ph !== 'own') return ph;
+    const m = lastMoney(st, iso);
+    return (m && (m.car || 0) > 0) || (st.done && st.done.car && st.done.car <= iso) ? 'own' : 'rent';
+  }
   // фаза месяца: своя машина с месяца покупки; аренда, если смены такси начинаются в этом месяце (дни до них считаются отдельно)
   function phaseOfMonth(g, mk) {
     const last = mk + '-' + pad(dim(mk));
@@ -130,15 +137,17 @@ const Core = (() => {
     return 'pre';
   }
   // жизнь за месяц: свой план месяца (st.months), если задан, иначе обычные конверты с ростом цен
+  const hasOv = ov => !!ov && ENV.some(k => ov[k] != null);
   function lifeOf(st, mk, pre) {
     const ov = st.months && st.months[mk];
-    if (ov && envSum(ov) > 0) return envSum(ov);
+    if (hasOv(ov)) return envSum(ov);
     const g = st.set;
     return (pre ? g.preLiving : g.living) * growth(g, mk)[0];
   }
   const growth = (g, mk) => { const t = mkDiff(g.start, mk); return [Math.pow(1 + g.gCost / 100, t / 12), Math.pow(1 + g.gRev / 100, t / 12)]; };
   const keepOf = (g, ph) => 1 - g.yandex / 100 - g.tax / 100 - (ph === 'rent' ? g.park / 100 : 0);
   // газ на своей машине: с месяца установки (пусто: сразу с покупки)
+  const gasOnDay = (g, iso, ph) => g.fuel === 'gas' && ph === 'own' && (!g.gasFrom || g.gasFrom <= iso);
   const gasOnMonth = (g, mk, ph) => g.fuel === 'gas' && ph === 'own' && (!g.gasFrom || mkOf(g.gasFrom) <= mk);
   function fuelPerHour(g, mk, ph, gas) {
     const fc = growth(g, mk)[0];
@@ -202,7 +211,7 @@ const Core = (() => {
     for (let i = 0; i < N; i++, mk = mkAdd(mk, 1)) {
       const frac = i === 0 ? (dim(mk) - +s0.iso.slice(8) + 1) / dim(mk) : 1;
       if (o.events && o.events[mk]) cash += o.events[mk];
-      if (+mk.slice(5) === 3 && pend) { otb += pend; pend = 0; }
+      if (pend && (+mk.slice(5) === 3 || (i === 0 && +mk.slice(5) > 3))) { otb += pend; pend = 0; }
       let ph = phaseOfMonth(g, mk);
       if (ph === 'own' && !owned) {
         const sc = startCost(g);
@@ -213,7 +222,7 @@ const Core = (() => {
       }
       if (owned && g.fuel === 'gas' && !gasDone && (!g.gasFrom || mkOf(g.gasFrom) <= mk)) { cash -= g.gasCost * growth(g, mk)[0]; gasDone = true; }
       let hrs = o.fixed ? (ph === 'pre' ? { h: 0, sh: 0 } : { h: o.fixed.h * frac, sh: o.fixed.sh * frac }) : o.plan === false ? { h: 0, sh: 0 } : monthPlan(st, mk, i === 0 ? s0.iso : null);
-      if (o.extraWeek && ph !== 'pre') hrs = Object.assign({}, hrs, { h: Math.max(0, hrs.h + o.extraWeek * dim(mk) * frac / 7) });
+      if (o.extraWeek && ph !== 'pre') hrs = Object.assign({}, hrs, { h: Math.max(0, hrs.h + o.extraWeek * Math.max(0, dim(mk) * frac - (hrs.preDays || 0)) / 7) });
       const wm = workMonth(g, mk, R, ph, hrs, owned ? age : 0, frac, ph === 'own' && gasDone, { pre: lifeOf(st, mk, true), taxi: lifeOf(st, mk, false) });
       let A = wm.free, due = 0, oc = 0;
       if (owned && loan > 0) { const it = loan * r * frac; due = Math.min(pay * frac, loan + it); loan += it - due; if (loan < 0.5) { loan = 0; closed = closed || mk; } }
@@ -277,7 +286,7 @@ const Core = (() => {
   function entries(st) {
     const g = st.set;
     if (!(g.preOnce > 0) || !g.preOnceDate) return st.money;
-    return st.money.concat([{ d: g.preOnceDate, kind: 'add', add: -g.preOnce, to: 'cash', t: 0, plan: true, note: 'разовые траты до такси' }]).sort(byDate);
+    return st.money.concat([{ d: g.preOnceDate, kind: 'add', add: -g.preOnce, to: 'cash', t: -1, plan: true, note: 'разовые траты до такси' }]).sort(byDate);
   }
   function addsSince(st, m, iso) {
     const r = { cash: 0, otb: 0 };
@@ -305,15 +314,21 @@ const Core = (() => {
     for (const x of entries(st)) if (isAdd(x) && !x.move && x.d > iso) ev[mkOf(x.d)] = (ev[mkOf(x.d)] || 0) + (+x.add || 0);
     return ev;
   }
-  // состояние Отбасы на дату: взносы этого года, премия за прошлый год до марта, перенос сверх потолка
+  // состояние Отбасы на дату: взносы этого года, премия за прошлый год (пока её не видно в сверке), перенос сверх потолка
   function otbState(st, iso) {
-    const g = st.set, y = +iso.slice(0, 4), put = {};
+    const g = st.set, y = +iso.slice(0, 4), line = moneyLine(st, iso), put = {};
     let prev = null;
-    for (const p of moneyLine(st, iso)) { if (prev != null && p.otb !== prev) { const yy = +p.d.slice(0, 4); put[yy] = (put[yy] || 0) + (p.otb - prev); } prev = p.otb; }
-    const capOf = yy => yy < 2027 ? g.otbCap26 : g.otbCap;
-    const basePrev = Math.max(0, put[y - 1] || 0), rewPrev = Math.min(basePrev, capOf(y - 1)), premPrev = rewPrev * g.otbPrem / 100;
-    const credited = iso.slice(5) >= '03-01';
-    return { yc: Math.max(0, (put[y] || 0) - (credited ? premPrev : 0)), carry: basePrev - rewPrev, pend: credited ? 0 : premPrev };
+    for (const p of line) { if (prev != null && p.otb !== prev) { const yy = +p.d.slice(0, 4); put[yy] = (put[yy] || 0) + (p.otb - prev); } prev = p.otb; }
+    const capOf = yy => yy < 2027 ? g.otbCap26 : g.otbCap, marks = line.filter(p => !isAdd(p.x)).map(p => p.d);
+    const seenBy = yy => marks.some(d => d >= (yy + 1) + '-03-01'); // премия за год yy видна в сверке с 1 марта следующего
+    const years = Object.keys(put).map(Number).sort((a, b) => a - b), prem = {};
+    let carry = 0;
+    for (let yy = years.length ? years[0] : y; yy < y; yy++) {
+      const base = Math.max(0, (put[yy] || 0) - (prem[yy - 1] && seenBy(yy - 1) ? prem[yy - 1] : 0)) + carry, rew = Math.min(base, capOf(yy));
+      prem[yy] = rew * g.otbPrem / 100; carry = base - rew;
+    }
+    const premPrev = prem[y - 1] || 0, credited = premPrev > 0 && seenBy(y - 1);
+    return { yc: Math.max(0, (put[y] || 0) - (credited ? premPrev : 0)), carry, pend: credited ? 0 : premPrev };
   }
 
   // выручка в час по записанным сменам (что платят пассажиры, до комиссий, в ценах ноября 2026)
@@ -322,28 +337,31 @@ const Core = (() => {
     const from = days ? isoAdd(iso, -days) : '0000';
     for (const [d, x] of Object.entries(st.shifts)) {
       if (d > iso || d < from || !x || !(x.h > 0) || !(x.app > 0)) continue;
-      const ph = phaseOn(g, d); if (ph === 'pre') continue;
+      const ph = phaseAt(st, d); if (ph === 'pre') continue;
       rh += x.app / keepOf(g, ph) / growth(g, mkOf(d))[1]; h += +x.h; n++;
     }
     return n ? { R: rh / h, n, h } : { R: null, n: 0, h: 0 };
   }
-  const usedR = (st, iso) => { const m = measuredR(st, iso, 120); return st.set.rLog && m.n >= 10 ? m.R : st.set.R; };
+  const usedR = (st, iso, cache) => {
+    if (cache) { const k = mkOf(iso); if (!cache.has(k)) cache.set(k, usedR(st, k + '-' + pad(dim(k)))); return cache.get(k); }
+    const m = measuredR(st, iso, 120); return st.set.rLog && m.n >= 10 ? m.R : st.set.R;
+  };
 
   // сколько остаётся с одного дня работы: деньги в руки минус топливо, мойка и аренда за этот день
-  function dayMoney(st, iso, h, app) {
-    const g = st.set, ph = phaseOn(g, iso);
+  function dayMoney(st, iso, h, app, cache) {
+    const g = st.set, ph = phaseAt(st, iso);
     if (!(h > 0)) return { income: 0, costs: 0, net: 0, ph };
     if (ph === 'pre') { const income = app > 0 ? +app : g.preRate * h; return { income, costs: 0, net: income, ph }; }
     const mk = mkOf(iso), [fc, fr] = growth(g, mk);
-    const income = app > 0 ? +app : usedR(st, iso) * fr * h * keepOf(g, ph); // выручку в час считаем, только если суммы нет
-    const costs = fuelPerHour(g, mk, ph, ph === 'own' ? gasOnMonth(g, mk, ph) : false) * h + g.wash26 / 26 * fc + (ph === 'rent' ? g.rentDay * fc : 0) +
+    const income = app > 0 ? +app : usedR(st, iso, cache) * fr * h * keepOf(g, ph); // выручку в час считаем, только если суммы нет
+    const costs = fuelPerHour(g, mk, ph, gasOnDay(g, iso, ph)) * h + g.wash26 / 26 * fc + (ph === 'rent' ? g.rentDay * fc : 0) +
       (ph === 'own' ? (g.oil / g.oilKm + g.tires / g.tiresKm) * g.kmH * h * fc : 0);
     return { income, costs, net: income - costs, ph };
   }
   // постоянные расходы за день (жизнь, связь, резерв на ремонт), они идут и в выходные.
   // m: последняя отметка; со своей машиной ещё проценты по кредиту и износ машины
   function dayFixed(st, iso, m) {
-    const g = st.set, mk = mkOf(iso), fc = growth(g, mk)[0], ph = phaseOn(g, iso), n = dim(mk);
+    const g = st.set, mk = mkOf(iso), fc = growth(g, mk)[0], ph = phaseAt(st, iso), n = dim(mk);
     if (ph === 'pre') return lifeOf(st, mk, true) / n;
     const extra = ph === 'rent' ? g.rentOther : g.phone + g.taxTech / 12 + g.battery + g.repair;
     let v = (lifeOf(st, mk, false) + extra * fc) / n;
@@ -352,47 +370,50 @@ const Core = (() => {
   }
   // оценка активов на сегодня: последняя отметка + смены после неё − постоянные расходы.
   // Считаем только до последней внесённой смены: дни без записей не тянут оценку вниз.
+  // смена после сверки: позже по дате или в тот же день, но внесена позже
+  const shiftAfter = (d, x, m) => d > m.d || (d === m.d && !!x && (x.t || 0) > (m.t || 0));
   function estimate(st, iso) {
     const m = lastMoney(st, iso);
     if (!m) return null;
+    const cache = new Map();
     let lastLog = null;
-    for (const d of Object.keys(st.shifts)) if (d > m.d && d <= iso && (!lastLog || d > lastLog)) lastLog = d;
+    for (const [d, x] of Object.entries(st.shifts)) if (d <= iso && shiftAfter(d, x, m) && (!lastLog || d > lastLog)) lastLog = d;
     let add = 0, logged = 0, missed = 0;
     for (let d = isoAdd(m.d, 1); d < iso; d = isoAdd(d, 1)) {
       const x = st.shifts[d];
       if (!x && planHours(st, d) > 0) missed++;
     }
     if (lastLog) {
-      for (let d = isoAdd(m.d, 1); d <= lastLog; d = isoAdd(d, 1)) {
+      for (let d = m.d; d <= lastLog; d = isoAdd(d, 1)) {
         const x = st.shifts[d];
-        if (x && x.h > 0) { add += dayMoney(st, d, +x.h, +x.app || 0).net; logged++; }
-        add -= dayFixed(st, d, m);
+        if (x && x.h > 0 && shiftAfter(d, x, m)) { add += dayMoney(st, d, +x.h, +x.app || 0, cache).net; logged++; }
+        if (d > m.d) add -= dayFixed(st, d, m);
       }
     }
     const ad = addsSince(st, m, iso);
-    return { base: m, na: naOf(m) + add + ad.cash + ad.otb, add, adds: ad, logged, missed, from: m.d, to: lastLog || m.d };
+    return { base: m, na: naOf(m) + add + ad.cash + ad.otb, add, adds: ad, logged, missed, from: m.d, to: lastLog || m.d, todayIn: lastLog === iso };
   }
 
   // старт прогноза с сегодняшнего дня по последней отметке
   function startState(st, iso) {
     const g = st.set, m = lastMoney(st, iso) || { d: iso, cash: 0, otb: 0, car: 0, loan: 0 };
     const est = estimate(st, iso);
-    const owned = (m.car || 0) > 0;
-    const carAge = owned && g.carFrom && g.carFrom <= iso ? mkDiff(mkOf(g.carFrom), mkOf(iso)) : 0;
-    const ob = otbState(st, iso), ad = est ? est.adds : { cash: 0, otb: 0 };
-    const cash = (m.cash || 0) + (est ? est.add : 0) + ad.cash;
     // смена за сегодня уже в оценке: прогноз начинается с завтра
-    const from = est && st.shifts[iso] && est.to === iso ? isoAdd(iso, 1) : iso;
+    const from = est && est.todayIn ? isoAdd(iso, 1) : iso;
+    const owned = (m.car || 0) > 0;
+    const carAge = owned && g.carFrom && g.carFrom <= from ? mkDiff(mkOf(g.carFrom), mkOf(from)) : 0;
+    const ob = otbState(st, from), ad = est ? est.adds : { cash: 0, otb: 0 };
+    const cash = (m.cash || 0) + (est ? est.add : 0) + ad.cash;
     return { iso: from, cash, otb: (m.otb || 0) + ad.otb, car: m.car || 0, loan: m.loan || 0, owned, carAge, yc: ob.yc, yi: 0, carry: ob.carry, pend: ob.pend };
   }
 
   // ---------------------------------------------------------------- прогноз, план и отставание
   function forecast(st, iso, o) {
     o = o || {};
-    const s0 = startState(st, iso), na0 = s0.cash + s0.otb + s0.car - s0.loan;
-    const p = project(st, s0, { R: o.R || usedR(st, iso), extraWeek: o.extraWeek || 0, events: futureEvents(st, iso) });
+    const s0 = o.s0 || startState(st, iso), na0 = s0.cash + s0.otb + s0.car - s0.loan, R = o.R || usedR(st, iso);
+    const p = project(st, s0, { R, extraWeek: o.extraWeek || 0, events: o.events || futureEvents(st, iso) });
     const goal = crossDate(p.rows, st.set.target, na0, iso);
-    return Object.assign(p, { s0, na0, goal, R: o.R || usedR(st, iso) });
+    return Object.assign(p, { s0, na0, goal, R });
   }
   // план на старте: с ним сравнивается, впереди ты или отстаёшь
   function makeBase(st, iso) {
@@ -425,7 +446,8 @@ const Core = (() => {
     if (f0.goal && f0.goal.iso <= dl) return { extra: 0, slackDays: isoDiff(f0.goal.iso, dl), fc: f0 };
     if (phaseOn(st.set, isoAdd(dl, -1)) === 'pre') return { extra: null, fc: f0 };
     let lo = 0, hi = 48;
-    const ok = x => { const f = forecast(st, iso, { extraWeek: x }); return f.goal && f.goal.iso <= dl; };
+    const base = { s0: f0.s0, R: f0.R, events: futureEvents(st, iso) };
+    const ok = x => { const f = forecast(st, iso, Object.assign({ extraWeek: x }, base)); return f.goal && f.goal.iso <= dl; };
     if (!ok(hi)) return { extra: null, fc: f0 };
     for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2; if (ok(mid)) hi = mid; else lo = mid; }
     return { extra: Math.ceil(hi * 2) / 2, fc: f0 };
@@ -434,14 +456,14 @@ const Core = (() => {
   // ---------------------------------------------------------------- смены: день, неделя, месяц
   // сколько остаётся с часа сверх плана: выручка после комиссий и налога минус топливо
   function hourValue(st, iso) {
-    const g = st.set, ph = phaseOn(g, iso);
+    const g = st.set, ph = phaseAt(st, iso);
     if (ph === 'pre') return g.preRate;
     const mk = mkOf(iso);
-    return usedR(st, iso) * growth(g, mk)[1] * keepOf(g, ph) - fuelPerHour(g, mk, ph, ph === 'own' ? gasOnMonth(g, mk, ph) : false);
+    return usedR(st, iso) * growth(g, mk)[1] * keepOf(g, ph) - fuelPerHour(g, mk, ph, gasOnDay(g, iso, ph));
   }
   // мойка и аренда за выход на смену
   function shiftCost(st, iso) {
-    const g = st.set, ph = phaseOn(g, iso), fc = growth(g, mkOf(iso))[0];
+    const g = st.set, ph = phaseAt(st, iso), fc = growth(g, mkOf(iso))[0];
     return ph === 'pre' ? 0 : g.wash26 / 26 * fc + (ph === 'rent' ? g.rentDay * fc : 0);
   }
   // день: эффект на цель считается от разницы в часах с планом (выручка за час как в среднем)
@@ -487,7 +509,7 @@ const Core = (() => {
     return { key: 'good', name: 'хороший', hint: 'можно копить и на аренде' };
   }
   // цифра приложения за 12 часов по выручке в час и фазе
-  const appPer12 = (st, iso, R) => { const g = st.set, ph = phaseOn(g, iso); return ph === 'pre' ? null : R * growth(g, mkOf(iso))[1] * 12 * keepOf(g, ph); };
+  const appPer12 = (st, iso, R) => { const g = st.set, ph = phaseAt(st, iso); return ph === 'pre' ? null : R * growth(g, mkOf(iso))[1] * 12 * keepOf(g, ph); };
 
   // ---------------------------------------------------------------- путь: вехи и этапы
   function milestones(st, iso, fc) {
@@ -523,13 +545,16 @@ const Core = (() => {
   }
   // конверты месяца: что нужно оплатить заработком смен (жизнь и обязательное по машине), по очереди
   function monthNeed(st, mk) {
-    const g = st.set, fc = growth(g, mk)[0], ph = phaseOfMonth(g, mk), pre = ph === 'pre', ov = st.months && st.months[mk];
-    const tpl = pre ? g.envPre : g.env, own = ov && envSum(ov) > 0;
-    const env = ENV.map(k => ({ key: k, title: ENV_TITLE[k], v: own ? +ov[k] || 0 : Math.round((+tpl[k] || 0) * fc / 1000) * 1000 }));
+    const g = st.set, fc = growth(g, mk)[0], last = mk + '-' + pad(dim(mk)), ov = st.months && st.months[mk], n = dim(mk);
+    let ph = phaseOfMonth(g, mk);
+    if (ph === 'own' && phaseAt(st, last) !== 'own') ph = 'rent';
+    const pre = ph === 'pre', own = hasOv(ov), preDays = pre ? n : monthPlan(st, mk).preDays, tf = (n - preDays) / n;
+    // в месяц первой смены такси конверты смешиваются: дни до неё по конвертам до такси
+    const env = ENV.map(k => ({ key: k, title: ENV_TITLE[k], v: own ? +ov[k] || 0 : Math.round(((+g.envPre[k] || 0) * preDays + (+g.env[k] || 0) * (n - preDays)) / n * fc / 1000) * 1000 }));
     let car = 0;
-    if (ph === 'rent') car = g.rentOther * fc;
+    if (ph === 'rent') car = g.rentOther * fc * tf;
     if (ph === 'own') {
-      const m = lastMoney(st, mk + '-' + pad(dim(mk)));
+      const m = lastMoney(st, last);
       car = (g.phone + g.taxTech / 12 + g.battery + g.repair) * fc + (m && m.loan > 0 ? annuity(g.price * (1 - g.down / 100), g.rate / 100, g.months) : 0);
     }
     if (car > 0) env.splice(1, 0, { key: 'car', title: ph === 'own' ? 'Машина и кредит' : 'Парк и мелочи', v: Math.round(car / 1000) * 1000 });
@@ -562,7 +587,9 @@ const Core = (() => {
       if (r.cash < 0 && !neg) neg = r.mk;
     }
     // дни месяца первой смены до неё: подработка и жизнь до такси, плюс траты, запланированные на этот месяц
-    const cur = tm === mkOf(fc.s0.iso), mp = monthPlan(st, tm, cur ? fc.s0.iso : null), ev = cur ? 0 : (futureEvents(st, iso)[tm] || 0);
+    const cur = tm === mkOf(fc.s0.iso), mp = monthPlan(st, tm, cur ? fc.s0.iso : null);
+    let ev = 0;
+    for (const x of entries(st)) if (isAdd(x) && !x.move && x.d > iso && x.d < g.taxiFrom && mkOf(x.d) === tm) ev += +x.add || 0;
     at += ev + mp.preH * g.preRate - lifeOf(st, tm, true) * mp.preDays / dim(tm);
     if (at < low) { low = at; lowMk = tm; }
     if (at < 0 && !neg) neg = tm;
@@ -600,7 +627,7 @@ const Core = (() => {
     plural, money, mln, num1, grp, dateLong, dateShort, monthName, daysText, untilText, DOW, DOWL, MON,
     planHours, phaseOn, phaseOfMonth, monthPlan, keepOf, fuelPerHour, growth, annuity, carValue, startCost, workMonth, project,
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
-    crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
+    phaseAt, shiftAfter, hasOv, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,
     milestones, otbYear, phaseNow, PHASES, dayMessage,
   };

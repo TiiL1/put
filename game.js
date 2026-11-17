@@ -36,9 +36,9 @@ const Game = (() => {
     { id: 'combo', br: 'Работа', icon: 'flame', title: 'Разгон', lvl: [3, 10, 20], text: r => 'Комбо растёт на ' + (5 + r) + '% за смену серии' },
     { id: 'marathon', br: 'Работа', icon: 'clock', title: 'Марафонец', lvl: [3, 12, 24], text: r => '+' + (10 * r) + '% опыта за часы после 10-го в смене' },
     { id: 'hunter', br: 'Работа', icon: 'target', title: 'Охотник', lvl: [6, 14, 26], text: r => 'Задание дня по заказам: +' + (30 + 15 * r) + ' XP' },
-    { id: 'boss', br: 'Работа', icon: 'shield', title: 'Гроза боссов', lvl: [10, 20, 30], text: r => 'Босс месяца: +' + (500 + 125 * r) + ' XP' },
-    { id: 'piggy', br: 'Деньги', icon: 'piggy', title: 'Копилка', lvl: [3, 10, 20], text: r => (1 + r) + ' XP за каждые 1 000 ₸ в Отбасы' },
-    { id: 'books', br: 'Деньги', icon: 'receipt', title: 'Бухгалтер', lvl: [3, 8, 16], text: r => 'Сумма за день в смене: +' + (5 + 5 * r) + ' XP' },
+    { id: 'boss', br: 'Работа', icon: 'shield', title: 'Боец', lvl: [10, 20, 30], text: r => 'Босс месяца: +' + (500 + 125 * r) + ' XP' },
+    { id: 'piggy', br: 'Деньги', icon: 'piggy', title: 'Вкладчик', lvl: [3, 10, 20], text: r => (1 + r) + ' XP за каждые 1 000 ₸ в Отбасы' },
+    { id: 'books', br: 'Деньги', icon: 'receipt', title: 'Счетовод', lvl: [3, 8, 16], text: r => 'Сумма за день в смене: +' + (5 + 5 * r) + ' XP' },
     { id: 'builder', br: 'Деньги', icon: 'house', title: 'Строитель', lvl: [8, 16, 28], text: r => 'Плитка квартиры: +' + (150 + 50 * r) + ' XP' },
     { id: 'econ', br: 'Деньги', icon: 'wallet', title: 'Экономист', lvl: [10, 20, 30], text: r => 'Жизнь на месяц оплачена: +' + (100 + 50 * r) + ' XP' },
     { id: 'sleep', br: 'Голова', icon: 'moon', title: 'Крепкий сон', lvl: [3, 10, 20], text: r => 'За ночь энергия +' + (22 + 2 * r) + ' вместо 22' },
@@ -99,7 +99,7 @@ const Game = (() => {
   series('hours', 'Часы', 'clock', [[50, 100, '50 часов'], [100, 200, '100 часов'], [250, 300, '250 часов'], [500, 500, '500 часов'], [1000, 1000, '1 000 часов'], [2000, 1500, '2 000 часов'], [3000, 2000, '3 000 часов'], [5000, 3000, '5 000 часов']], c => c.hours, k => C.grp(k) + ' часов работы');
   series('streak', 'Серия', 'flame', [[3, 50, '3 подряд'], [7, 100, '7 подряд'], [14, 200, '14 подряд'], [30, 500, '30 подряд'], [60, 1000, '60 подряд'], [100, 2000, '100 подряд']], c => c.best, k => pl(k, ['смена', 'смены', 'смен']) + ' подряд. Выходные по плану серию не рвут');
   series('weeks', 'Недели', 'check', [[1, 150, 'Неделя закрыта'], [4, 300, '4 недели'], [12, 600, '12 недель'], [26, 1000, 'Полгода недель'], [52, 2000, 'Год недель']], c => c.weeks.length, k => 'Закрой ' + pl(k, ['неделю', 'недели', 'недель']) + ' без недобора');
-  series('paid', 'Месяц', 'wallet', [[1, 150, 'Месяц оплачен'], [3, 400, '3 месяца оплачено'], [12, 1500, 'Год оплачен']], c => c.paid.length, k => 'Оплати сменами жизнь на месяц ' + k + ' раз');
+  series('paid', 'Месяц', 'wallet', [[1, 150, 'Месяц оплачен'], [3, 400, '3 месяца оплачено'], [12, 1500, 'Год оплачен']], c => c.paid.length, k => 'Оплати сменами жизнь на ' + pl(k, ['месяц', 'месяца', 'месяцев']));
   series('dayoff', 'Сверх плана', 'bolt', [[1, 100, 'Выходной в работу'], [5, 250, '5 выходных в работу'], [20, 600, '20 выходных в работу']], c => c.dayOffs, k => 'Выйди в плановый выходной ' + k + ' раз');
   one('long-13', 'Сверх плана', 'bolt', 'orange', 'Длинная смена', 'Смена 13 часов и больше', 150, () => 13, c => Math.min(13, c.longest));
   one('long-15', 'Сверх плана', 'bolt', 'orange', 'Марафон', 'Смена 15 часов и больше', 300, () => 15, c => Math.min(15, c.longest));
@@ -119,7 +119,7 @@ const Game = (() => {
   one('ownq-5', 'Задания', 'star', 'violet', 'Сам себе начальник', 'Выполни 5 своих заданий', 200, () => 5, c => c.ownDone);
   one('winter', 'Особые', 'snow', 'blue', 'Пережил зиму', '40 смен с декабря по февраль', 1000, () => 40, c => c.winterMax);
   one('rest-1', 'Голова', 'moon', 'green', 'Умный отдых', 'Отдохни в выходной, когда энергия ниже половины', 150);
-  series('mood', 'Голова', 'heart', [[7, 150, 'Слышу себя'], [30, 400, 'Дневник энергии']], c => c.moods, k => 'Отметь, как ты, ' + k + ' дней');
+  series('mood', 'Голова', 'heart', [[7, 150, 'Слышу себя'], [30, 400, 'Дневник энергии']], c => c.moods, k => 'Отмечай, как ты, ' + k + ' дней');
   one('why', 'Голова', 'heart', 'green', 'Знаю зачем', 'Напиши в настройках, зачем тебе квартира', 100);
 
   // ---------------------------------------------------------------- всё из записей одним проходом
@@ -131,17 +131,22 @@ const Game = (() => {
     const mark = (k, d) => { if (k && !c.at[k]) c.at[k] = d; };
     const logged = Object.keys(sh).filter(d => d <= iso).sort();
     const from = [logged[0], g.preFrom, g.taxiFrom].filter(d => d && d <= iso).sort()[0];
-    let n = 0, frz = 0, since = 0, E = 100, appH = [], ordH = [], wH = 0, wP = 0, weeksDone = 0, bestWeek = 0, bestDay = 0, bestMonth = 0, monthApp = 0, monthsDone = 0;
+    let n = 0, frz = 0, since = 0, E = 100, wH = 0, wP = 0, weeksDone = 0, bestWeek = 0, bestDay = 0, bestMonth = 0, monthApp = 0, monthsDone = 0;
+    const hist = { pre: { app: [], ord: [] }, taxi: { app: [], ord: [] } }, rc = new Map(), months = [];
+    let partial = false;
     let bm = null, hp = 0, dmg = 0, beaten = null, need = 0, earned = 0, paidOn = null;
     const winter = {};
     if (from) for (let d = from; d <= iso; d = C.isoAdd(d, 1)) {
       const p = C.planHours(st, d), x = sh[d], h = x && x.h > 0 ? +x.h : 0, app = x && x.app > 0 ? +x.app : 0, ord = x && x.orders > 0 ? +x.orders : 0, worked = h > 0, past = d < iso;
       const mk = C.mkOf(d), mo = +mk.slice(5);
       if (mk !== bm) { // новый месяц: босс (часы по плану на весь месяц) и счёт: жизнь оплачена
-        bm = mk; hp = 0; dmg = 0; beaten = null; monthApp = 0; earned = 0; paidOn = null; need = C.monthNeed(st, mk).total;
-        for (let k = 1; k <= C.dim(mk); k++) hp += C.planHours(st, mk + '-' + C.pad(k));
+        if (bm) months.push({ mk: bm, need, earned, paidOn, partial });
+        bm = mk; hp = 0; dmg = 0; beaten = null; monthApp = 0; earned = 0; paidOn = null; need = C.monthNeed(st, mk).total; partial = d > mk + '-01';
+        // будущие дни месяца без разовых правок: поставить всё в выходные и победить босса нельзя
+        for (let k = 1; k <= C.dim(mk); k++) { const dd = mk + '-' + C.pad(k); hp += C.planHours(st, dd, dd > iso); }
       }
-      // задания дня: цели по деньгам и заказам от медианы прошлых 10 смен
+      // задания дня: цели по деньгам и заказам от медианы прошлых 10 смен той же работы (доставка и такси отдельно)
+      const H = hist[C.phaseOn(g, d) === 'pre' ? 'pre' : 'taxi'], appH = H.app, ordH = H.ord;
       const mT = appH.length >= 3 ? Math.ceil(median(appH.slice(-10)) * 1.05 / 500) * 500 : null;
       const oT = ordH.length >= 3 ? Math.round(median(ordH.slice(-10))) + 1 : null;
       if (p > 0 || worked) {
@@ -163,7 +168,7 @@ const Game = (() => {
       if (n > c.best) c.best = n;
       // энергия: ночь восстанавливает, работа тратит, выходной даёт больше
       const Eprev = E;
-      E = Math.min(100, E + 22 + 2 * rk(st, 'sleep', d)) - drain(h) + (worked ? 0 : 30);
+      E = Math.min(100, E + 22 + 2 * rk(st, 'sleep', d)) - drain(h) + (worked || !past ? 0 : 30);
       const md = moods[d];
       if (md) E += md <= 2 ? -8 : md >= 4 ? 4 : 0;
       E = Math.max(0, Math.min(100, E));
@@ -182,7 +187,7 @@ const Game = (() => {
         if (mo === 12 || mo <= 2) { const wk = mo === 12 ? +d.slice(0, 4) : +d.slice(0, 4) - 1; winter[wk] = (winter[wk] || 0) + 1; c.winterMax = Math.max(c.winterMax, winter[wk]); if (winter[wk] >= 40) mark('winter', d); }
         if (app > 0) { if (c.apps > 5 && app > bestDay) c.recs.push({ d, kind: 'day', v: app }); bestDay = Math.max(bestDay, app); }
         monthApp += app;
-        earned += C.dayMoney(st, d, h, app).net;
+        earned += C.dayMoney(st, d, h, app, rc).net;
         if (!paidOn && need > 0 && earned >= need) { paidOn = d; c.paid.push({ mk, d }); }
       }
       // босс месяца
@@ -199,12 +204,12 @@ const Game = (() => {
         wH = 0; wP = 0;
       }
       // месяц закрывается в последний день: рекорд заработка за месяц
-      if (+d.slice(8) === C.dim(mk) && past && monthApp > 0) {
+      if (+d.slice(8) === C.dim(mk) && past && monthApp > 0 && !partial) {
         if (monthsDone >= 1 && monthApp > bestMonth) c.recs.push({ d, kind: 'month', v: monthApp });
         bestMonth = Math.max(bestMonth, monthApp); monthsDone++;
       }
     }
-    c.streak = n; c.freezes = frz; c.combo = comboAt(st, n, iso); c.energy = from ? E : 100;
+    c.streak = n; c.freezes = frz; c.combo = comboAt(st, n, iso); c.energy = from ? E : 100; c.months = months;
     const nth = (arr, t) => arr[t - 1] && arr[t - 1].d;
     for (const t of [1, 4, 12, 26, 52]) mark('weeks-' + t, nth(c.weeks, t));
     for (const t of [1, 3, 12]) mark('paid-' + t, nth(c.paid, t));
@@ -244,7 +249,7 @@ const Game = (() => {
     const ownDone = (st.quests || []).filter(q => q.done && q.done <= iso).map(q => q.done).sort();
     c.ownDone = ownDone.length;
     mark('ownq-5', ownDone[4]);
-    if (g.why && String(g.why).trim()) mark('why', g.whyOn && g.whyOn <= iso ? g.whyOn : iso);
+    if (g.why && String(g.why).trim()) mark('why', g.whyOn && g.whyOn <= iso ? g.whyOn : st.created && st.created <= iso ? st.created : iso);
     return c;
   }
 
@@ -272,7 +277,7 @@ const Game = (() => {
     for (const b of c.bosses) push(b.d, XP.boss + 125 * rk(st, 'boss', b.d), 'boss', 'Босс побеждён: ' + b.name);
     for (const r of c.recs) push(r.d, XP.record, 'record', r.kind === 'day' ? 'Рекорд дня: ' + C.money(r.v) : r.kind === 'week' ? 'Рекорд недели: ' + C.num1(r.v) + ' ч' : 'Рекорд месяца: ' + C.money(r.v));
     for (const d of c.rests) push(d, XP.rest + 50 * rk(st, 'breath', d), 'rest', 'Восстановление');
-    for (const d of Object.keys(st.mood || {})) if (d <= iso) push(d, XP.mood + 5 * rk(st, 'mode', d), 'mood', 'Отметил, как ты');
+    for (const d of Object.keys(st.mood || {})) if (d <= iso) push(d, XP.mood + 5 * rk(st, 'mode', d), 'mood', 'Отметка: как ты');
     for (const p of c.line) if (C.isAdd(p.x) && p.x.to === 'otb' && p.x.add > 0) push(p.d, Math.floor(p.x.add / 1000) * (XP.per1000 + rk(st, 'piggy', p.d)), 'save', 'В Отбасы ' + C.money(+p.x.add));
     for (const t of c.tiles) push(t.d, XP.tile + 50 * rk(st, 'builder', t.d), 'tile', 'Плитка квартиры ' + t.j + ' из ' + XP.tiles);
     for (const [id, d] of Object.entries(st.done || {})) if (questXp(id) && d) push(d > iso ? iso : d, questXp(id), 'quest', 'Веха: ' + questTitle(id));
@@ -323,12 +328,13 @@ const Game = (() => {
       }
       ratio = exp > 0 ? got / exp : null;
     }
-    const m = c.month, thrift = m && m.earned > 0 ? (m.earned - m.need) / m.earned : null;
+    const closed = (c.months || []).filter(x => !x.partial && x.earned > 0).pop(), m = c.month && c.month.paidOn ? c.month : closed;
+    const thrift = m && m.earned > 0 ? (m.earned - m.need) / m.earned : null;
     const out = [
       { key: 'stam', title: 'Выносливость', icon: 'clock', lvl: lv(h / 4 / 8), val: C.num1(Math.round(h / 4)) + ' ч в неделю', tip: 'Часы в неделю за последние 4 недели. 70-80 ч = максимум.' },
-      { key: 'disc', title: 'Дисциплина', icon: 'check', lvl: plan ? lv(done / plan * 10) : 1, val: plan ? done + ' из ' + plan + ' смен по плану' : 'нет смен', tip: 'Сколько плановых смен закрыто полностью за 4 недели.' },
+      { key: 'disc', title: 'Дисциплина', icon: 'check', lvl: plan ? lv(done / plan * 10) : 1, val: plan ? done + ' из ' + plan + ' ' + C.plural(plan, ['смены', 'смен', 'смен']) + ' по плану' : 'нет смен', tip: 'Сколько плановых смен закрыто полностью за 4 недели.' },
       { key: 'grip', title: 'Хватка', icon: 'target', lvl: ratio == null ? 1 : lv(1 + (ratio - 0.7) / 0.6 * 9), val: ratio == null ? 'внеси суммы 3 смен' : C.money(Math.round(recent.reduce((s, d) => s + st.shifts[d].app / st.shifts[d].h, 0) / recent.length)) + ' в час', tip: 'Заработок в час против плана. Растёт от часов пик, хороших районов и Экспресса в спад.' },
-      { key: 'thrift', title: 'Бережливость', icon: 'piggy', lvl: thrift == null ? 1 : lv(1 + (thrift + 0.5) * 9), val: thrift == null ? 'нет заработка в месяце' : (thrift >= 0 ? C.money(Math.round(m.earned - m.need)) + ' сверх жизни' : 'жизнь ещё не оплачена'), tip: 'Сколько заработка в этом месяце остаётся сверх конвертов.' },
+      { key: 'thrift', title: 'Бережливость', icon: 'piggy', lvl: thrift == null ? 1 : lv(1 + (thrift + 0.5) * 9), val: thrift == null ? 'ещё нет закрытого месяца' : (thrift >= 0 ? C.money(Math.round(m.earned - m.need)) + ' сверх жизни за ' + C.MON[+m.mk.slice(5) - 1] : 'за ' + C.MON[+m.mk.slice(5) - 1] + ' жизнь покрыта на ' + C.money(Math.round(m.earned))), tip: 'Сколько заработка остаётся сверх конвертов за последний закрытый месяц.' },
       { key: 'rec', title: 'Восстановление', icon: 'battery', lvl: eN ? lv(eSum / eN / 10) : 10, val: eN ? 'энергия ' + Math.round(eSum / eN) + ' в среднем' : 'энергия полная', tip: 'Средняя энергия за 4 недели. Сон и выходные держат её.' },
     ];
     const weak = out.slice().sort((a, b) => a.lvl - b.lvl)[0];
@@ -366,11 +372,11 @@ const Game = (() => {
       done: all.filter(x => x.done).sort((a, b) => (a.doneOn || '') < (b.doneOn || '') ? 1 : -1) };
   }
   // совет по энергии
-  function energyTip(e) {
-    if (e >= 70) return { tone: 'good', text: 'Силы есть. Хороший день, чтобы закрыть план.' };
-    if (e >= 40) return { tone: 'ok', text: 'Нормально. Сон 7-8 часов и перерыв каждые 2 часа держат темп.' };
+  function energyTip(e, frz, off) {
+    if (e >= 70) return { tone: 'good', text: off ? 'Силы есть. Выходной твой.' : 'Силы есть. Хороший день, чтобы закрыть план.' };
+    if (e >= 40) return { tone: 'ok', text: 'Нормально. Перерыв каждые 2 часа держит темп.' };
     if (e >= 20) return { tone: 'warn', text: 'Устал. Ближайший выходной не трать на работу: отдых сейчас даст бонус.' };
-    return { tone: 'warn', text: 'Батарейка почти пустая. За рулём уставшим опасно: возьми выходной. Заморозка сохранит серию.' };
+    return { tone: 'warn', text: 'Батарейка почти пустая. За рулём уставшим опасно: возьми выходной.' + (frz ? ' Заморозка сохранит серию.' : '') };
   }
 
   return { XP, QUEST_XP, questXp, questTitle, cum, levelOf, RANKS, rankOf, SKINS, skinOf, BADGES, PERKS, pointsOf, rk, context, ledger, player, preview, shiftXp, quests, comboOf, bossName, energyTip };
