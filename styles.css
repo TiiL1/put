@@ -570,3 +570,58 @@ b { font-weight: 700; }
 .good-note .ico { width: 18px; height: 18px; color: var(--green); flex: none; margin-top: 1px; }
 .pv-b { padding: 11px 12px; border-radius: 14px; background: rgba(255, 255, 255, .035); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
 .warn-t { color: #FFB4A8; }
+
+/* смена с таймером, плохой день */
+.today-act { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; }
+.today-act .btn.sm { flex: none; width: auto; padding: 0 16px; gap: 8px; }
+.card.live.due { border-color: rgba(255, 155, 63, .55); box-shadow: 0 0 0 1px rgba(255, 155, 63, .25) inset; }
+.brk { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; padding: 9px 11px; border-radius: 12px; background: rgba(255, 255, 255, .035); border: 1px solid var(--line); font-size: 13.5px; line-height: 1.4; color: #D9DDEA; }
+.brk .ico { width: 18px; height: 18px; color: var(--muted); flex: none; margin-top: 1px; }
+.brk.due { background: rgba(255, 155, 63, .1); border-color: rgba(255, 155, 63, .4); color: #FFD3A8; }
+.brk.due .ico { color: var(--orange); }
+.bad-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.bad-b { min-height: 52px; padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line2); font-weight: 700; color: var(--text); text-align: left; }
+.bad-b:active { background: rgba(142, 125, 255, .18); border-color: var(--violet); }
+
+/* что если */
+.wif-open { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; margin-top: 14px; padding: 0 12px; border-radius: 14px; background: rgba(142, 125, 255, .1); border: 1px solid rgba(142, 125, 255, .3); color: var(--violet-t); font-weight: 700; font-size: 14.5px; text-align: left; }
+.wif-open span { flex: 1; }
+.wif-open .ico { width: 18px; height: 18px; flex: none; }
+.wif-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 8px 2px; border-bottom: 1px solid var(--line); }
+.wif-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.wif-row b { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.wif-row small { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.wif-row small.up { color: var(--green-t); }
+.wif-row small.dn { color: var(--coral); }
+.wif-row input { width: 24px; height: 24px; accent-color: var(--yellow); flex: none; }
+.wif-sum { margin-top: 12px; padding: 11px 12px; border-radius: 14px; background: rgba(255, 255, 255, .035); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; color: #D9DDEA; }
+.wif-sum b { color: var(--text); }
+
+/* итоги недели и месяца */
+.recap { border-color: rgba(142, 125, 255, .35); background: linear-gradient(180deg, rgba(142, 125, 255, .1), rgba(142, 125, 255, 0) 60%), var(--card1); }
+.recap-big { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 12px; }
+.recap-big b { font: 800 30px/1.1 var(--font-num); letter-spacing: -.02em; }
+.recap-big b.up { color: var(--green-t); }
+.recap-big b.down { color: var(--coral); }
+.recap-big span { font-size: 14px; color: var(--muted); }
+.recap-list { list-style: none; margin-top: 12px; display: grid; gap: 6px; }
+.recap-list li { font-size: 14px; line-height: 1.4; color: #D9DDEA; padding-left: 16px; position: relative; }
+.recap-list li::before { content: ''; position: absolute; left: 2px; top: 8px; width: 6px; height: 6px; border-radius: 2px; background: var(--violet); }
+
+/* календарь и дневник */
+.cal-btn { display: flex; align-items: center; gap: 12px; text-align: left; }
+.cal-btn > .ico { width: 22px; height: 22px; color: var(--violet-t); flex: none; }
+.cal-btn span { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.cal-btn small { font-size: 12.5px; color: var(--muted); }
+.cal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cal-row span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-row b { font-size: 14.5px; font-weight: 600; }
+.cal-row small { font-size: 12.5px; color: var(--muted); }
+.cal-add { flex: none; min-height: 40px; display: inline-flex; align-items: center; padding: 0 14px; border-radius: 12px; background: rgba(142, 125, 255, .14); border: 1px solid rgba(142, 125, 255, .35); color: var(--violet-t); font-weight: 700; font-size: 14px; text-decoration: none; }
+.note-fld { margin-top: 14px; }
+.note-fld span { display: flex; align-items: center; gap: 6px; }
+.note-fld span .ico { width: 16px; height: 16px; }
+.diary .di { display: flex; gap: 12px; align-items: baseline; width: 100%; text-align: left; padding: 10px 0; border-bottom: 1px solid var(--line); min-height: 44px; }
+.diary .di:last-of-type { border-bottom: 0; }
+.diary .di span { flex: none; width: 74px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.diary .di b { font-weight: 500; font-size: 14.5px; line-height: 1.4; color: #D9DDEA; }

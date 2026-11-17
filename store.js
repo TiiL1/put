@@ -140,7 +140,7 @@ const Store = (() => {
   const hasData = s => !!(s && s.money && s.money.length);
   const union = (a, b) => Array.from(new Set((a || []).concat(b || [])));
   // что уже праздновали, только растёт: уровень и награды, увиденные на одном устройстве, не празднуем снова на другом
-  const seenOf = (a, b) => { a = a || {}; b = b || {}; return { level: Math.max(a.level || 1, b.level || 1), badges: union(a.badges, b.badges) }; };
+  const seenOf = (a, b) => { a = a || {}; b = b || {}; return { level: Math.max(a.level || 1, b.level || 1), badges: union(a.badges, b.badges), recap: union(a.recap, b.recap).slice(-40) }; };
   const withSeen = next => Object.assign(next, { seen: seenOf(state && state.seen, next.seen) });
   // слияние, когда менялись и телефон, и облако: смены, сверки, вехи, задания и отметки объединяются, настройки берём новее.
   // Удалённое (del: путь -> когда удалили) не возвращается с другого устройства, если запись там не правили позже удаления
@@ -150,7 +150,7 @@ const Store = (() => {
     for (const [p, t] of Object.entries(newer.del || {})) del[p] = Math.max(del[p] || 0, +t || 0);
     // у смен, заданий и конвертов месяца есть своё время правки u (или создания t); у простых отметок судим по последней правке устройства
     const live = (p, x, s) => !del[p] || (x && typeof x === 'object' ? x.u || x.t || 0 : s.updated || 0) > del[p];
-    for (const k of ['shifts', 'over', 'done', 'mood', 'months']) {
+    for (const k of ['shifts', 'over', 'done', 'mood', 'months', 'bad', 'diary']) {
       out[k] = {};
       for (const s of [older, newer]) for (const [id, x] of Object.entries(s[k] || {})) if (live(k + '/' + id, x, s)) out[k][id] = x;
     }

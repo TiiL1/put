@@ -105,6 +105,7 @@
     <div class="tiles2"><div class="tile"><div class="over">За ${C.MON[+TODAY.slice(5, 7) - 1]} со смен</div><b class="${pl.month && pl.month.earned > 0 ? 'up' : ''}">${pl.month && pl.month.earned ? moneyHtml(Math.round(pl.month.earned)) : '0<span class="cur">\u00A0₸</span>'}</b><span>${C.phaseAt(st, TODAY) === 'pre' ? 'на руки с доставки' : C.phaseAt(st, TODAY) === 'rent' ? 'после бензина и аренды' : 'после бензина и мойки'}</span></div>
       <div class="tile"><div class="over">До срока</div>${m.daysLeft >= 0 ? `<b>${m.daysLeft}<small> ${C.plural(m.daysLeft, ['день', 'дня', 'дней'])}</small></b>` : '<b class="down">прошёл</b>'}<span>${C.dateLong(st.set.deadline)}</span></div></div>
     ${todayCard(m, working)}
+    ${recapCard(m)}
     ${yp && !st.shifts[TODAY] ? `<button class="card tap block" data-a="log" data-d="${yest}"><div class="over">Вчера, ${C.num1(yx.h)} ч</div>${praiseBox(yp)}</button>` : ''}
     ${energyCard(m)}
     ${m.pre ? runwayCard(m) : ''}
@@ -117,6 +118,101 @@
     ${nearBadges(pl)}
     ${notes(m)}`;
   }
+  // ---------------------------------------------------------------- итоги недели и месяца
+  function periodStats(st, from, to) {
+    let h = 0, sh = 0, app = 0, appH = 0, best = null;
+    for (let d = from; d <= to; d = C.isoAdd(d, 1)) {
+      const x = st.shifts[d]; if (!x || !(x.h > 0)) continue;
+      h += +x.h; sh++;
+      if (x.app > 0) { app += +x.app; appH += +x.h; if (!best || +x.app > best.app) best = { d, app: +x.app }; }
+    }
+    let plan = 0; for (let d = from; d <= to; d = C.isoAdd(d, 1)) plan += C.planHours(st, d);
+    return { h, sh, app, perH: appH ? app / appH : null, best, plan };
+  }
+  // какие итоги показать: месяц в первые 3 дня следующего, неделя с воскресенья до вторника; закрытые не показываем
+  function recapOf(st) {
+    const seen = (st.seen && st.seen.recap) || [], dw = C.dow(TODAY), list = [];
+    if (+TODAY.slice(8) <= 3) { const mk = C.mkAdd(C.mkOf(TODAY), -1); list.push({ key: 'm' + mk, kind: 'month', from: mk + '-01', to: mk + '-' + C.pad(C.dim(mk)), pFrom: C.mkAdd(mk, -1) + '-01', pTo: C.mkAdd(mk, -1) + '-' + C.pad(C.dim(C.mkAdd(mk, -1))) }); }
+    if (dw === 6 || dw <= 1) { const mon = dw === 6 ? C.monday(TODAY) : C.isoAdd(C.monday(TODAY), -7); list.push({ key: 'w' + mon, kind: 'week', from: mon, to: C.isoAdd(mon, 6), pFrom: C.isoAdd(mon, -7), pTo: C.isoAdd(mon, -1) }); }
+    for (const r of list) {
+      if (seen.indexOf(r.key) >= 0) continue;
+      const a = periodStats(st, r.from, r.to < TODAY ? r.to : TODAY); if (!a.sh) continue;
+      return Object.assign(r, { a, b: periodStats(st, r.pFrom, r.pTo) });
+    }
+    return null;
+  }
+  // всё, что нужно и карточке, и картинке
+  function recapData(m) {
+    const st = m.st, r = recapOf(st); if (!r) return null;
+    const end = r.to < TODAY ? r.to : TODAY, e0 = C.estimate(st, C.isoAdd(r.from, -1)), e1 = C.estimate(st, end);
+    const na0 = e0 ? e0.na : null, na1 = e1 ? e1.na : m.na, pl = m.pl;
+    const xp = pl.ledger.filter(e => e.d >= r.from && e.d <= end).reduce((x, e) => x + e.xp, 0);
+    const badges = pl.badges.filter(b => b.on && b.on >= r.from && b.on <= end).map(b => b.title);
+    const title = r.kind === 'month' ? 'Итоги месяца' : 'Итоги недели';
+    const range = r.kind === 'month' ? cap(C.monthName(C.mkOf(r.from))) : `${+r.from.slice(8)}${r.from.slice(5, 7) !== r.to.slice(5, 7) ? ' ' + C.dateShort(r.from).split(' ')[1] : ''}–${C.dateShort(r.to)}`;
+    // против себя в прошлом периоде: выручка за час и часы
+    const vs = [];
+    if (r.a.perH && r.b.perH) { const p = Math.round((r.a.perH / r.b.perH - 1) * 100); vs.push(p === 0 ? 'за час столько же' : `за час ${p > 0 ? '+' : '−'}${Math.abs(p)}%`); }
+    if (r.b.sh) { const dh = Math.round(r.a.h - r.b.h); vs.push(dh === 0 ? 'часов столько же' : `часов ${dh > 0 ? '+' : '−'}${Math.abs(dh)}`); }
+    return Object.assign(r, { na0, na1, delta: na0 != null ? na1 - na0 : null, xp, badges, title, range, vs, pct0: na0 != null ? na0 / m.target : null, pct1: na1 / m.target, level: pl.level, rank: pl.rank.title });
+  }
+  function recapCard(m) {
+    const R = recapData(m); if (!R) return '';
+    const a = R.a, prevName = R.kind === 'month' ? 'прошлого месяца' : 'прошлой недели';
+    return `<section class="card recap"><div class="between"><div><div class="over">${R.title}</div><div class="h3">${esc(R.range)}</div></div><button class="link" data-a="recap-share">${ic('share')}Поделиться</button></div>
+      ${R.delta != null ? `<div class="recap-big"><b class="${R.delta >= 0 ? 'up' : 'down'}">${C.money(r1k(R.delta), true)}</b><span>к активам за ${R.kind === 'month' ? 'месяц' : 'неделю'}</span></div>
+        <div class="pbar"><i style="width:${Math.max(0, Math.min(100, R.pct1 * 100)).toFixed(1)}%"></i></div><div class="sub">${Math.floor(R.pct1 * 100)}% пути${R.pct0 != null && Math.floor(R.pct0 * 100) !== Math.floor(R.pct1 * 100) ? `, было ${Math.floor(R.pct0 * 100)}%` : ''}</div>` : ''}
+      <div class="kv"><div><span>Часов</span><b>${C.num1(a.h)}${a.plan > 0 ? `<small> из ${C.num1(a.plan)}</small>` : ''}</b></div><div><span>Смен</span><b>${a.sh}</b></div>
+        <div><span>В приложении</span><b>${C.money(a.app)}</b></div><div><span>За час</span><b>${a.perH ? C.money(Math.round(a.perH)) : '–'}</b></div></div>
+      <ul class="recap-list">
+        ${a.best ? `<li>Лучший день: ${C.DOWL[C.dow(a.best.d)]}, ${C.money(a.best.app)}</li>` : ''}
+        ${R.vs.length ? `<li>Против ${prevName}: ${R.vs.join(', ')}</li>` : ''}
+        ${R.badges.length ? `<li>Новые награды: ${esc(R.badges.slice(0, 3).join(', '))}${R.badges.length > 3 ? ` и ещё ${R.badges.length - 3}` : ''}</li>` : ''}
+        ${R.xp > 0 ? `<li>Опыт: +${C.grp(R.xp)} XP</li>` : ''}
+      </ul>
+      <div class="btns"><button class="btn alt" data-a="recap-ok" data-v="${R.key}">Понятно</button></div></section>`;
+  }
+  // картинка итогов, чтобы отправить близким
+  function recapImage(R) {
+    const W = 1080, H = 1350, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const x = cv.getContext('2d'), F = '-apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif';
+    const bg = x.createLinearGradient(0, 0, 0, H); bg.addColorStop(0, '#1A2140'); bg.addColorStop(1, '#090D18'); x.fillStyle = bg; x.fillRect(0, 0, W, H);
+    const glow = x.createRadialGradient(W - 120, 160, 10, W - 120, 160, 520); glow.addColorStop(0, 'rgba(142,125,255,.35)'); glow.addColorStop(1, 'rgba(142,125,255,0)'); x.fillStyle = glow; x.fillRect(0, 0, W, H);
+    // текст уменьшается, пока не влезет в ширину картинки
+    const txt = (t, px, y, color, weight, size, align) => { let sz = size; do { x.font = `${weight || 700} ${sz}px ${F}`; sz -= 2; } while (sz > 24 && x.measureText(t).width > W - px - 60); x.fillStyle = color; x.textAlign = align || 'left'; x.fillText(t, px, y); };
+    const rr = (px, py, w, h, r) => { x.beginPath(); x.moveTo(px + r, py); x.arcTo(px + w, py, px + w, py + h, r); x.arcTo(px + w, py + h, px, py + h, r); x.arcTo(px, py + h, px, py, r); x.arcTo(px, py, px + w, py, r); x.closePath(); };
+    txt('ПУТЬ К КВАРТИРЕ', 90, 150, '#9AA3BD', 800, 34);
+    txt(R.title, 90, 240, '#F3F5FB', 800, 76);
+    txt(R.range, 90, 305, '#9AA3BD', 600, 44);
+    if (R.delta != null) {
+      txt(C.money(r1k(R.delta), true).replace(/\u00a0/g, ' '), 90, 470, R.delta >= 0 ? '#72EFB3' : '#FF7867', 800, 128);
+      txt('к активам за ' + (R.kind === 'month' ? 'месяц' : 'неделю'), 90, 530, '#9AA3BD', 600, 40);
+    }
+    rr(90, 590, W - 180, 34, 17); x.fillStyle = '#0A0E25'; x.fill();
+    const pw = Math.max(34, (W - 180) * Math.max(0, Math.min(1, R.pct1))); const pg = x.createLinearGradient(90, 0, 90 + pw, 0); pg.addColorStop(0, '#6E5DF2'); pg.addColorStop(1, '#A193FF');
+    rr(90, 590, pw, 34, 17); x.fillStyle = pg; x.fill();
+    txt(Math.floor(R.pct1 * 100) + '% пути к своей квартире', 90, 680, '#D9DDEA', 700, 40);
+    const cells = [['Часов', C.num1(R.a.h)], ['Смен', String(R.a.sh)], ['В приложении', C.money(R.a.app)], ['За час', R.a.perH ? C.money(Math.round(R.a.perH)) : '–']];
+    cells.forEach(([k, v], i) => {
+      const cx = 90 + (i % 2) * 460, cy = 740 + Math.floor(i / 2) * 190;
+      rr(cx, cy, 440, 165, 28); x.fillStyle = 'rgba(255,255,255,.05)'; x.fill(); x.strokeStyle = 'rgba(255,255,255,.09)'; x.lineWidth = 2; x.stroke();
+      txt(k, cx + 34, cy + 58, '#9AA3BD', 600, 34); txt(v.replace(/\u00a0/g, ' '), cx + 34, cy + 128, '#F3F5FB', 800, 54);
+    });
+    const line = R.vs.length ? 'Против ' + (R.kind === 'month' ? 'прошлого месяца' : 'прошлой недели') + ': ' + R.vs.join(', ') : R.a.best ? 'Лучший день: ' + C.DOWL[C.dow(R.a.best.d)] + ', ' + C.money(R.a.best.app) : '';
+    if (line) txt(line.replace(/\u00a0/g, ' '), 90, 1180, '#D9DDEA', 600, 38);
+    txt(`Уровень ${R.level} · ${R.rank}${R.xp > 0 ? ' · +' + C.grp(R.xp).replace(/\u00a0/g, ' ') + ' XP' : ''}`, 90, 1265, '#B9AEFF', 700, 38);
+    return cv;
+  }
+  async function shareRecap() {
+    const R = recapData(model()); if (!R) return;
+    const cv = recapImage(R), blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    if (!blob) return;
+    const name = (R.kind === 'month' ? 'itogi-mesyaca-' : 'itogi-nedeli-') + R.from + '.png', file = new File([blob], name, { type: 'image/png' });
+    try { if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: R.title }); return; } }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000); toast('Картинка сохранена в загрузки');
+  }
   function nextDaysText(st) {
     const t1 = C.isoAdd(TODAY, 1), p1 = C.planHours(st, t1);
     let off = null;
@@ -126,6 +222,7 @@
   const workName = (st, d) => st.set.taxiFrom && d >= st.set.taxiFrom ? 'Смена' : 'Доставка';
   function todayCard(m, working) {
     const st = m.st, g = st.set, plan = C.planHours(st, TODAY), x = st.shifts[TODAY], pl = m.pl;
+    if (st.live) return liveCard(m); // смена с таймером идёт или ждёт, когда внесёшь сумму
     if (!working) {
       const Q = G.quests(st, TODAY, m.fc).open[0], ph = C.phaseNow(st, TODAY, m.fc);
       const dPre = g.preFrom && TODAY < g.preFrom ? C.isoDiff(TODAY, g.preFrom) : null, dTaxi = g.taxiFrom ? C.isoDiff(TODAY, g.taxiFrom) : null;
@@ -147,12 +244,14 @@
       return `<section class="card"><div class="today-top"><div class="ibox">${ic('wheel')}</div><div><div class="over">Сегодня по плану</div><div class="today-t">${name} ${C.num1(plan)} ч</div></div>
         <div class="today-side">${nextDaysText(st)}</div></div>
         ${dayQuests(pl.dq)}
-        ${quickHours(TODAY, plan)}</section>`;
+        ${quickHours(TODAY, plan)}
+        <div class="today-act"><button class="btn alt sm" data-a="live-start">${ic('play')}Начал смену</button><button class="link" data-a="bad-day">Не могу сегодня</button></div></section>`;
     }
     return `<section class="card"><div class="today-top"><div class="ibox violet">${ic('moon')}</div><div><div class="over">Сегодня</div><div class="today-t">Выходной</div></div>
       <div class="today-side">${nextDaysText(st)}</div></div>
-      <p class="lead">Сегодня отдых. ${pl.energy < 50 ? `Энергия ${Math.round(pl.energy)} из 100: отдых сейчас даст +${XPN().rest} XP за восстановление.` : `Если выйдешь, за смену в выходной +${XPN().dayOff} XP.`}</p>
-      ${quickHours(TODAY, 0)}</section>`;
+      <p class="lead">${st.bad && st.bad[TODAY] ? `Сегодня не работаешь: ${esc(st.bad[TODAY].toLowerCase())}. Отдыхай и приходи в себя, план и прогноз уже пересчитаны.` : `Сегодня отдых. ${pl.energy < 50 ? `Энергия ${Math.round(pl.energy)} из 100: отдых сейчас даст +${XPN().rest} XP за восстановление.` : `Если выйдешь, за смену в выходной +${XPN().dayOff} XP.`}`}</p>
+      ${quickHours(TODAY, 0)}
+      <div class="today-act"><button class="btn alt sm" data-a="live-start">${ic('play')}Начал смену</button></div></section>`;
   }
   // задания дня: план, заработок и заказы чуть выше твоего обычного, все три = сундук
   function dayQuests(q) {
@@ -164,6 +263,65 @@
     if (q.ordersT != null) out += row(q.ordersDone, `Заказов от ${q.ordersT}`, XPN().ordersDay);
     const chest = q.chest ? `<div class="chest on">${ic('chest')}<span>Сундук открыт</span>${xpChip(q.chest)}</div>` : q.avail >= 2 ? `<div class="chest">${ic('chest')}<span>Выполни все задания: сундук 50‑150 XP</span></div>` : '';
     return `<div class="dqs"><div class="over">Задания дня</div>${out}${chest}</div>`;
+  }
+  // ---------------------------------------------------------------- смена с таймером и перерывы
+  const BREAK_MIN = 120; // перерыв каждые 2 часа за рулём
+  const hm = min => { const t = Math.max(0, Math.round(min)), h = Math.floor(t / 60), mm = t % 60; return h ? h + '\u00a0ч' + (mm ? ' ' + mm + '\u00a0мин' : '') : mm + '\u00a0мин'; };
+  const clock = ms => { const d = new Date(ms); return C.pad(d.getHours()) + ':' + C.pad(d.getMinutes()); };
+  // сколько минут за рулём без перерывов и сколько с последнего перерыва
+  function liveTimes(L, now) {
+    const end = L.end || now; let brk = 0, lastEnd = L.start;
+    for (const [a, b] of L.brk || []) { brk += b - a; lastEnd = Math.max(lastEnd, b); }
+    if (L.on) brk += end - L.on;
+    return { drive: Math.max(0, (end - L.start - brk) / 60000), since: L.on ? 0 : Math.max(0, (end - lastEnd) / 60000), lastEnd };
+  }
+  const liveHours = L => Math.max(0.5, Math.round(liveTimes(L, Date.now()).drive / 30) / 2);
+  function liveCard(m) {
+    const st = m.st, L = st.live, t = liveTimes(L, Date.now()), plan = C.planHours(st, L.d), name = workName(st, L.d);
+    if (L.end) {
+      return `<section class="card live"><div class="today-top"><div class="ibox green">${ic('check')}</div><div><div class="over">Смена закончена${L.d !== TODAY ? ', ' + C.dateShort(L.d) : ''}</div><div class="today-t">${hm(t.drive)} за рулём</div></div></div>
+        <p class="sub">Внеси сумму и заказы из Яндекс Про, часы уже подставлены.</p>
+        <div class="btns"><button class="btn" data-a="live-log">${ic('check')}Внести смену</button></div>
+        <div class="today-act"><span></span><button class="link" data-a="live-cancel">Сбросить таймер</button></div></section>`;
+    }
+    const due = !L.on && t.since >= BREAK_MIN;
+    return `<section class="card live${due ? ' due' : ''}"><div class="today-top"><div class="ibox${L.on ? ' violet' : ''}">${ic(L.on ? 'pause' : 'wheel')}</div><div><div class="over">${L.on ? 'Перерыв' : name + ' идёт'}</div><div class="today-t" id="live-t">${hm(t.drive)}</div></div>
+        <div class="today-side">с ${clock(L.start)}${plan > 0 ? `<br><b>план ${C.num1(plan)} ч</b>` : ''}</div></div>
+      ${plan > 0 ? `<div class="pbar"><i id="live-bar" style="width:${Math.min(100, t.drive / (plan * 60) * 100).toFixed(1)}%"></i></div>` : ''}
+      <div class="brk${due ? ' due' : ''}" id="live-brk">${ic('clock')}<span>${liveBrkText(L, t, plan)}</span></div>
+      <div class="btns"><button class="btn alt" data-a="live-pause">${L.on ? ic('play') + 'Продолжить' : ic('pause') + 'Перерыв'}</button><button class="btn" data-a="live-stop">${ic('check')}Закончил</button></div></section>`;
+  }
+  function liveBrkText(L, t, plan) {
+    const left = plan > 0 ? plan * 60 - t.drive : 0, tail = plan > 0 ? (left > 0 ? ` До плана ${hm(left)}.` : ' План дня закрыт.') : '';
+    if (L.on) return `Перерыв ${hm((Date.now() - L.on) / 60000)}. Пройдись, попей воды.` + tail;
+    if (t.since >= BREAK_MIN) return `За рулём ${hm(t.since)} без перерыва. Выйди из машины на 10-15 минут: так безопаснее.` + tail;
+    return `Перерыв через ${hm(BREAK_MIN - t.since)}.` + tail;
+  }
+  // раз в полминуты обновляем таймер и напоминаем про перерыв (пока приложение открыто)
+  function liveTick() {
+    const st = S(), L = st && st.live;
+    if (!L || L.end) return;
+    const t = liveTimes(L, Date.now()), plan = C.planHours(st, L.d), el = $('#live-t');
+    if (el) {
+      el.textContent = hm(t.drive);
+      const bar = $('#live-bar'); if (bar && plan > 0) bar.style.width = Math.min(100, t.drive / (plan * 60) * 100).toFixed(1) + '%';
+      const b = $('#live-brk'); if (b) { b.lastElementChild.textContent = liveBrkText(L, t, plan); b.classList.toggle('due', !L.on && t.since >= BREAK_MIN); }
+    }
+    // напоминание: в 2 часа за рулём и потом каждые полчаса, пока не сделаешь перерыв
+    if (!L.on && t.since >= BREAK_MIN) {
+      const step = Math.floor((t.since - BREAK_MIN) / 30), key = t.lastEnd + ':' + step;
+      if (UI.brkKey !== key) { UI.brkKey = key; buzz([200, 100, 200]); toast(`${hm(t.since)} за рулём без перерыва. Выйди из машины на 10-15 минут.`, 'warn'); }
+    }
+  }
+  setInterval(liveTick, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') liveTick(); });
+  // плохой день: выходной без чувства вины, план и прогноз пересчитываются, серию держит заморозка
+  const BAD = ['Заболел', 'Машина сломалась', 'Нет сил', 'Дела'];
+  function badSheet() {
+    const pl = playerOf(S(), TODAY);
+    sheet(`<div class="sh-t">Плохой день бывает</div><div class="sh-s">Отметь, что случилось. Сегодня станет выходным, план недели и прогноз пересчитаются. ${pl.freezes > 0 ? 'Серию сохранит заморозка.' : 'Серия начнётся заново, это нормально: главное цель.'}</div>
+      <div class="bad-list">${BAD.map(r => `<button class="bad-b" data-a="bad-save" data-v="${r}">${r}</button>`).join('')}</div>
+      <div class="btns"><button class="btn ghost" data-a="sheet-close">Всё-таки поработаю</button></div>`);
   }
   function quickHours(iso, plan) {
     const base = plan > 0 ? [0, 6, plan, plan + 3] : [4, 6, 8, 12];
@@ -239,6 +397,54 @@
     return `<div class="range"><div class="over">К ${C.dateLong(st.set.deadline)} будет</div><div class="range-v"><span>от</span><b class="${lo < 0 ? 'down' : ''}">${f(lo)}</b><span>до</span><b class="up">${f(hi)}</b></div>
       <div class="sub">По прогнозу ${f(mid)}. Вилка: выручка от ${C.money(Math.round(R0 * 0.88 / 50) * 50)} до ${C.money(Math.round(R0 * 1.15 / 50) * 50)} в час до вычетов.${lo < 0 ? (m.fc.warn ? ' Минус значит, что без своей машины аренда съедает накопления.' : ' Минус значит, что аренда съедает накопления: переходи на свою машину раньше.') : ''}</div></div>`;
   }
+  // ---------------------------------------------------------------- что если: как решения двигают цель
+  // каждый вариант считается отдельно от текущего плана; включённые вместе дают общую строку внизу
+  function wifOpts(st) {
+    const g = st.set, taxi = C.phaseAt(st, TODAY) !== 'pre' || (g.taxiFrom && g.taxiFrom > TODAY);
+    const wk = [0, 1, 2, 3, 4, 5, 6].map(i => +((g.tpl || [])[i] || 0)), sh = wk.filter(h => h > 0), avg = sh.length ? sh.reduce((a, b) => a + b, 0) / sh.length : 12;
+    const scale = (e, k) => { const o = {}; C.ENV.forEach(x => { o[x] = Math.max(0, (+e[x] || 0) * k); }); return o; };
+    const life = (gg, cut) => { for (const key of ['env', 'envPre']) { const sum = C.envSum(gg[key]); if (sum > cut) gg[key] = scale(gg[key], (sum - cut) / sum); } gg.living = C.envSum(gg.env); gg.preLiving = C.envSum(gg.envPre); };
+    const out = [];
+    if (taxi && sh.length < 7) out.push({ id: 'shift', title: sh.length === 6 ? `Без выходного, +${C.num1(avg)} ч в неделю` : `+1 смена в неделю, ${C.num1(avg)} ч`, extra: avg });
+    if (taxi && sh.length) out.push({ id: 'hour', title: '+1 час к каждой смене', extra: sh.length });
+    out.push({ id: 'life', title: 'Жить на 20 000 ₸ в месяц дешевле', set: gg => life(gg, 20000) });
+    if (taxi) out.push({ id: 'rev', title: 'Выручка в час на 10% выше', rk: 1.1 });
+    if (!st.car && g.carFrom && C.addMonths(g.carFrom, -2) > (g.taxiFrom || TODAY) && C.addMonths(g.carFrom, -2) > TODAY) out.push({ id: 'car', title: 'Своя машина на 2 месяца раньше', set: gg => { gg.carFrom = C.addMonths(gg.carFrom, -2); } });
+    if (g.fuel !== 'gas' && (st.car || g.carFrom)) out.push({ id: 'gas', title: `Поставить газ, ${C.money(g.gasCost)}`, set: gg => { gg.fuel = 'gas'; gg.gasFrom = st.car ? C.isoAdd(TODAY, 1) : ''; } });
+    return out;
+  }
+  function wifRun(st, R, list) {
+    const s2 = Object.assign({}, st, { set: Object.assign({}, st.set, { env: Object.assign({}, st.set.env), envPre: Object.assign({}, st.set.envPre) }) });
+    let extra = 0, rk = 1;
+    for (const o of list) { if (o.set) o.set(s2.set); extra += o.extra || 0; rk *= o.rk || 1; }
+    const f = C.forecast(s2, TODAY, { R: R * rk, extraWeek: extra }), mk = C.mkOf(st.set.deadline), r = f.rows.find(x => x.mk === mk);
+    return { goal: f.goal ? f.goal.iso : null, na: r ? r.na : null };
+  }
+  // как вариант меняет цель: дни раньше или позже, а если цели нет, то деньги к сроку
+  function wifEffect(base, x) {
+    if (base.goal && x.goal) { const d = C.isoDiff(x.goal, base.goal); return d > 0 ? { t: 'на ' + days(d) + ' раньше', up: true } : d < 0 ? { t: 'на ' + days(-d) + ' позже', up: false } : { t: 'без разницы', up: null }; }
+    if (!base.goal && x.goal) return { t: 'успеешь к ' + C.dateShort(x.goal) + ' ' + x.goal.slice(0, 4), up: true };
+    if (base.na != null && x.na != null) { const d = x.na - base.na; return { t: (d >= 0 ? '+' : '−') + mlnShort(Math.abs(d)) + ' к сроку', up: d > 0 }; }
+    return { t: '', up: null };
+  }
+  let wifMemo = null;
+  function wifBlock(m) {
+    if (!UI.wif) return `<button class="wif-open" data-a="wif">${ic('sliders')}<span>Что если: как решения двигают цель</span>${ic('down')}</button>`;
+    const st = m.st, R = m.fc.R, key = st.updated + '|' + TODAY + '|' + R;
+    if (!wifMemo || wifMemo.key !== key) {
+      const opts = wifOpts(st), base = wifRun(st, R, []);
+      wifMemo = { key, opts, base, eff: opts.map(o => wifEffect(base, wifRun(st, R, [o]))) };
+    }
+    const W = wifMemo, on = UI.wifOn || (UI.wifOn = new Set());
+    return `<div class="wif"><button class="wif-open on" data-a="wif">${ic('sliders')}<span>Что если</span>${ic('up')}</button>
+      ${W.opts.map((o, i) => `<label class="wif-row"><span><b>${esc(o.title)}</b><small class="${W.eff[i].up === true ? 'up' : W.eff[i].up === false ? 'dn' : ''}">${W.eff[i].t}</small></span><input type="checkbox" data-wif="${o.id}"${on.has(o.id) ? ' checked' : ''}></label>`).join('')}
+      <div class="wif-sum" id="wif-sum">${wifSum(m)}</div></div>`;
+  }
+  function wifSum(m) {
+    const W = wifMemo, on = UI.wifOn; if (!W || !on || !on.size) return 'Отметь варианты, и здесь будет, что выйдет вместе.';
+    const list = W.opts.filter(o => on.has(o.id)), x = wifRun(m.st, m.fc.R, list), e = wifEffect(W.base, x);
+    return x.goal ? `Вместе: цель <b>${C.dateLong(x.goal)}</b>, ${e.t}.` : `Вместе: до цели пока не доходит, ${e.t}.`;
+  }
   function forecastCard(m) {
     const st = m.st, dl = st.set.deadline;
     if (m.na >= m.target) return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Цель есть</div><div class="fc-sub">${C.money(m.na)} активов. Дальше Отбасы и квартира.</div></section>`;
@@ -246,7 +452,7 @@
       const w = m.fc.warn, ex = m.need.extra;
       const why = w && st.set.carFrom ? `К ${C.dateLong(st.set.carFrom)} не хватит около ${C.money(Math.round(w.short / 1000) * 1000)} на взнос за свою машину, а на аренде до цели не дойти.` : `При таком плане до ${C.money(m.target)} не дойти.`;
       const how = ex ? ` С +${C.num1(ex)} ч в неделю машина будет, и к сроку успеваешь.` : ' Помогут меньше трат на жизнь (конверты), машина дешевле или 7 смен в неделю.';
-      return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div><div class="fc-sub">${why}${how}</div>${rangeLine(m)}</section>`;
+      return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div><div class="fc-sub">${why}${how}</div>${rangeLine(m)}${wifBlock(m)}</section>`;
     }
     const g = m.fc.goal.iso, diff = C.isoDiff(g, dl), late = diff < 0, span = Math.max(C.isoDiff(TODAY, dl), C.isoDiff(TODAY, g), 1);
     const pf = Math.max(0, Math.min(100, C.isoDiff(TODAY, g) / span * 100)), pd = Math.max(0, Math.min(100, C.isoDiff(TODAY, dl) / span * 100));
@@ -258,7 +464,7 @@
       <div class="tl"><div class="tl-track"></div><div class="tl-done" style="width:${pf.toFixed(1)}%"></div>
         <div class="tl-fl${late ? ' late' : ''}" style="left:${Math.max(8, Math.min(92, pf)).toFixed(1)}%">прогноз</div><div class="tl-dot" style="left:0"></div>
         <div class="tl-end" style="left:${pd.toFixed(1)}%"></div><div class="tl-dot ${late ? 'late' : 'fc'}" style="left:${pf.toFixed(1)}%"></div></div>
-      <div class="tl-lab"><span>Сегодня</span><span>Срок ${C.dateLong(dl)}</span></div></section>`;
+      <div class="tl-lab"><span>Сегодня</span><span>Срок ${C.dateLong(dl)}</span></div>${wifBlock(m)}</section>`;
   }
   function weekSegs(st, mon) {
     let html = '', lab = '';
@@ -363,6 +569,7 @@
     return `<button class="bar${cls}" data-a="day" data-d="${d}" aria-label="${C.DOWL[C.dow(d)]} ${C.dateShort(d)}"><span class="bar-d">${C.DOW[C.dow(d)]}</span><div class="bar-col">${col}</div>${val}</button>`;
   }
   // панель выбранного дня: прошлое и сегодня вносим, будущее планируем
+  const noteField = (st, d) => d > TODAY ? '' : `<label class="fld note-fld"><span>${ic('book')}Строчка в дневник</span><input id="p-note" data-day="${d}" maxlength="120" value="${esc(((st.diary || {})[d] || {}).text || '')}" placeholder="как прошёл день, одной фразой"></label>`;
   function dayPanel(st, d, fc) {
     const plan = C.planHours(st, d), x = st.shifts[d] || null, head = d === TODAY ? 'Сегодня, ' + C.DOWL[C.dow(d)] : cap(C.DOWL[C.dow(d)]) + ', ' + C.dateShort(d);
     const started = (st.set.preFrom && d >= st.set.preFrom) || (st.set.taxiFrom && d >= st.set.taxiFrom);
@@ -385,7 +592,8 @@
         <label class="fld"><span>Заказов</span><input inputmode="numeric" id="p-ord" value="${esc(UI.dord)}" placeholder="0"></label></div>
       <div class="preview" id="pv">${previewHtml(st, d, fc)}</div>
       <div class="btns"><button class="btn" data-a="save-day" data-d="${d}" ${h == null ? 'disabled' : ''}>${ic('check')}Сохранить смену</button></div>
-      ${x ? `<button class="btn danger" data-a="del-log" data-d="${d}">${ic('trash')}Удалить запись</button>` : ''}</section>`;
+      ${x ? `<button class="btn danger" data-a="del-log" data-d="${d}">${ic('trash')}Удалить запись</button>` : ''}
+      ${noteField(st, d)}</section>`;
   }
   function previewHtml(st, d, fc) {
     const h = UI.dh;
@@ -442,6 +650,15 @@
       <div class="sub">Куплена ${C.dateLong(c.on)}, ${c.loan ? 'в кредит' : 'за наличные'}. Стоит сейчас около ${C.money(r1k(now.car))}.</div>
       ${loan}
       <div class="sub">Расход ${C.num1(g.l100)} л на 100 км, ${fuel === 'gas' ? 'газ' : 'бензин'} ${C.money(Math.round((fuel === 'gas' ? g.gas : g.petrol) * F))} за литр. Топливо по плану месяца около ${C.money(r1k(fm))}.</div></section>`;
+  }
+  // аренда или своя: по твоим сменам за 30 дней, только пока ездишь на аренде
+  function rentOwnCard(m) {
+    const st = m.st, g = st.set; if (st.car || C.phaseAt(st, TODAY) !== 'rent') return '';
+    const r = C.rentVsOwn(st, TODAY); if (!r) return '';
+    const preset = C.CARS.find(c => c.price === g.price && c.down === g.down), name = preset ? 'своей машине (' + preset.name + ')' : 'своей машине по плану', d = r.own - r.rent;
+    return `<section class="card"><div class="between"><div class="over">Аренда или своя</div><span class="link">по ${r.n} ${C.plural(r.n, ['смене', 'сменам', 'сменам'])} за 30 дней</span></div>
+      <div class="kv"><div><span>На аренде осталось</span><b class="${r.rent < 0 ? 'down' : ''}">${C.money(r1k(r.rent))}</b></div><div><span>На своей было бы</span><b class="${d > 0 ? 'up' : ''}">${C.money(r1k(r.own))}</b></div></div>
+      <p class="sub">${d > 0 ? `На ${esc(name)} за те же смены оставалось бы на <b class="up">${C.money(r1k(d))}</b> в месяц больше${r.pay > 0 ? `, уже после платежа по кредиту ${C.money(r1k(r.pay))}` : ''}. И машина остаётся твоей.` : `Пока аренда не хуже своей машины${r.pay > 0 ? ` с платежом ${C.money(r1k(r.pay))}` : ''}: можно не спешить.`} На взнос и оформление нужно около ${C.money(r1k(r.start))}.</p></section>`;
   }
   // покупка или правка своей машины
   function carSheet() {
@@ -526,6 +743,7 @@
       <div class="as-note">Записывать каждую трату не надо: жизнь задаётся конвертами месяца. Раз в неделю или месяц нажми Сверить и впиши, сколько есть. Перевод в Отбасы: +${1 + G.rk(st, 'piggy')} XP за каждые 1 000 ₸.</div>
     </section>
     ${carMoneyCard(m)}
+    ${rentOwnCard(m)}
     ${monthCard(m)}
     ${m.pre ? runwayCard(m) : ''}
     <section class="card"><div class="over">План и прогноз</div>${chart(m)}
@@ -608,7 +826,49 @@
       <button class="add-q" data-a="quest-new">${ic('plus')}Своё задание</button></section>
     ${Q.done.length ? `<div class="sec-h"><div class="h3">Сделано</div><span class="link">${Q.done.length}</span></div>
       <section class="card">${Q.done.slice(0, UI.allDone ? 999 : 4).map(q => questRow(q, false)).join('')}
-      ${Q.done.length > 4 && !UI.allDone ? '<button class="btn ghost" data-a="all-done">Показать все</button>' : ''}</section>` : ''}`;
+      ${Q.done.length > 4 && !UI.allDone ? '<button class="btn ghost" data-a="all-done">Показать все</button>' : ''}</section>` : ''}
+    <button class="card tap block cal-btn" data-a="cal">${ic('cal')}<span><b>Даты в календарь телефона</b><small>Платежи, страховка, Отбасы и вехи: телефон сам напомнит</small></span>${ic('right')}</button>
+    ${diaryCard(st)}`;
+  }
+  // ---------------------------------------------------------------- дневник пути: одна строчка к дню
+  function diaryCard(st) {
+    const list = Object.entries(st.diary || {}).filter(([d, x]) => x && x.text && d <= TODAY).sort((a, b) => a[0] < b[0] ? 1 : -1);
+    const head = `<div class="sec-h"><div class="h3">Дневник</div><span class="link">${list.length || ''}</span></div>`;
+    if (!list.length) return head + `<section class="card"><p class="sub" style="margin-top:0">Строчку к дню можно написать во вкладке Смены, под сменой. Через год приятно перечитать, как шёл.</p></section>`;
+    return head + `<section class="card diary">${list.slice(0, UI.diaryAll ? 999 : 5).map(([d, x]) => `<button class="di" data-a="day-open" data-d="${d}"><span>${C.dateShort(d)}${d.slice(0, 4) !== TODAY.slice(0, 4) ? ' ' + d.slice(0, 4) : ''}</span><b>${esc(x.text)}</b></button>`).join('')}
+      ${list.length > 5 && !UI.diaryAll ? '<button class="btn ghost" data-a="diary-all">Показать все</button>' : ''}</section>`;
+  }
+  // ---------------------------------------------------------------- даты в календарь
+  function calEvents(st, fc) {
+    const ev = [], lp = C.loanPlan(st, TODAY), money = v => C.money(Math.round(v)).replace(/\u00a0/g, ' ');
+    for (const s of C.milestones(st, TODAY, fc)) if (s.kind === 'task' && !s.done && s.date && s.date >= TODAY && !/^otb-y/.test(s.id)) ev.push({ id: 'm-' + s.id, d: s.date, t: s.title, x: s.hint || '' });
+    for (const q of st.quests || []) if (!q.done && q.date && q.date >= TODAY) ev.push({ id: 'q-' + q.id, d: q.date, t: q.title, x: 'Своё задание' });
+    if (lp && lp.bal > 0 && lp.next) ev.push({ id: 'loan', d: lp.next, t: 'Платёж по кредиту за машину, ' + money(lp.pay), x: 'Ещё ' + lp.left + ' платежей по графику.', rr: 'FREQ=MONTHLY;COUNT=' + lp.left });
+    if (st.car) { let y = C.addYears(st.car.on, 1); while (y < TODAY) y = C.addYears(y, 1); ev.push({ id: 'ins', d: C.isoAdd(y, -7), t: 'Продлить страховку ОГПО на машину', x: 'Срок страховки ' + C.dateLong(y) + '.', rr: 'FREQ=YEARLY' }); }
+    if (st.set.otbOpen) { const y = +TODAY.slice(0, 4), d = (TODAY > y + '-12-15' ? y + 1 : y) + '-12-15'; if (d <= st.set.deadline) ev.push({ id: 'otb', d, t: 'Положить в Отбасы до конца года', x: 'Премия 20% начисляется за взносы календарного года.', rr: 'FREQ=YEARLY;UNTIL=' + st.set.deadline.replace(/-/g, '') }); }
+    return ev.sort((a, b) => a.d < b.d ? -1 : 1);
+  }
+  const ymd = iso => iso.replace(/-/g, '');
+  function gcalLink(e) {
+    const q = 'action=TEMPLATE&text=' + encodeURIComponent(e.t) + '&dates=' + ymd(e.d) + '/' + ymd(C.isoAdd(e.d, 1)) + '&details=' + encodeURIComponent(e.x || '') + (e.rr ? '&recur=' + encodeURIComponent('RRULE:' + e.rr) : '');
+    return 'https://calendar.google.com/calendar/render?' + q;
+  }
+  function icsText(ev) {
+    const esc2 = t => String(t).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+    const fold = l => { const out = []; let cur = ''; for (const ch of l) { if (cur.length >= 60) { out.push(cur); cur = ' '; } cur += ch; } out.push(cur); return out.join('\r\n'); };
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//put//ru', 'CALSCALE:GREGORIAN', 'X-WR-CALNAME:Путь к квартире'];
+    for (const e of ev) lines.push('BEGIN:VEVENT', 'UID:put-' + e.id + '-' + ymd(e.d) + '@tiil1.github.io', 'DTSTAMP:' + now, 'DTSTART;VALUE=DATE:' + ymd(e.d), 'DTEND;VALUE=DATE:' + ymd(C.isoAdd(e.d, 1)),
+      'SUMMARY:' + esc2(e.t), 'DESCRIPTION:' + esc2(e.x || ''), ...(e.rr ? ['RRULE:' + e.rr] : []), 'BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:' + esc2(e.t), 'TRIGGER:-PT14H', 'END:VALARM', 'END:VEVENT');
+    lines.push('END:VCALENDAR');
+    return lines.map(fold).join('\r\n') + '\r\n';
+  }
+  function calSheet() {
+    const m = model(), ev = calEvents(m.st, m.fc);
+    sheet(`<div class="sh-t">Даты в календарь</div><div class="sh-s">Напоминание придёт накануне в 10:00. Нажми Добавить у нужных дат или скачай все сразу файлом.</div>
+      ${ev.length ? ev.map(e => `<div class="cal-row"><span><b>${esc(e.t)}</b><small>${C.dateLong(e.d)}${e.rr ? (/MONTHLY/.test(e.rr) ? ', каждый месяц' : ', каждый год') : ''}</small></span><a class="cal-add" href="${gcalLink(e)}" target="_blank" rel="noopener">Добавить</a></div>`).join('')
+        : '<p class="lead">Ближайших дат пока нет.</p>'}
+      ${ev.length ? `<div class="btns"><button class="btn alt" data-a="cal-ics">${ic('dl')}Скачать все файлом</button></div><div class="sub">Файл открывается календарём на iPhone и Samsung. В Google Календаре на Android удобнее кнопки Добавить.</div>` : ''}`);
   }
   function questRow(q, compact) {
     const d = q.date ? C.isoDiff(TODAY, q.date) : null;
@@ -784,8 +1044,8 @@
     if (sheetOpen) closeSheet(true);
     else if (UI.sub) { UI.sub = null; render(); }
   });
-  function logSheet(d) {
-    const st = S(), x = st.shifts[d] || {}, plan = C.planHours(st, d);
+  function logSheet(d, preH) {
+    const st = S(), x = Object.assign({}, st.shifts[d] || {}, preH != null ? { h: preH } : {}), plan = C.planHours(st, d);
     sheet(`<div class="sh-t">${cap(C.DOWL[C.dow(d)])}, ${C.dateLong(d)}</div><div class="sh-s">По плану: ${plan > 0 ? workName(st, d).toLowerCase() + ' ' + C.num1(plan) + ' ч' : 'выходной'}</div>
       <div class="quick">${[0, 4, 6, 8, 10, 12, 13, 14, 15, 16].map(h => `<button class="q${x.h != null && +x.h === h ? ' sel' : ''}${h === plan && plan > 0 ? ' plan' : ''}" data-a="pick-h" data-d="${d}" data-h="${h}">${h}<small>ч</small></button>`).join('')}</div>
       <label class="fld"><span>Часов</span><input inputmode="decimal" id="f-h" value="${x.h != null ? C.num1(+x.h || 0) : ''}" placeholder="${plan || 0}"></label>
@@ -894,7 +1154,7 @@
       fxQueue.push({ kind: 'level', level: pl.level, rank: pl.rank.title, newRank: was !== pl.rank.title, skin });
     }
     newB.forEach(id => fxQueue.push({ kind: 'badge', b: pl.badges.find(x => x.id === id) }));
-    if (pl.level > st.seen.level || newB.length) Store.update(s => { s.seen = { level: Math.max(pl.level, s.seen.level), badges: Array.from(new Set(s.seen.badges.concat(got))) }; }, 'seen');
+    if (pl.level > st.seen.level || newB.length) Store.update(s => { s.seen = Object.assign({}, s.seen, { level: Math.max(pl.level, s.seen.level), badges: Array.from(new Set(s.seen.badges.concat(got))) }); }, 'seen');
     if ($('#fx').hidden) nextFx();
   }
   function nextFx() {
@@ -920,7 +1180,11 @@
   function logShift(d, h, app, orders) {
     const before = snap();
     // t: когда смену записали впервые (сверка в тот же день раньше неё её не включает), u: когда правили последний раз
-    Store.update(s => { const x = s.shifts[d] || {}, now = Date.now(); x.h = h; if (app != null) x.app = app; if (orders != null) x.orders = orders; x.t = x.t || now; x.u = now; s.shifts[d] = x; }, 'log');
+    Store.update(s => {
+      const x = s.shifts[d] || {}, now = Date.now(); x.h = h; if (app != null) x.app = app; if (orders != null) x.orders = orders; x.t = x.t || now; x.u = now; s.shifts[d] = x;
+      if (s.live && s.live.d === d) s.live = null;
+      if (h > 0 && s.bad && s.bad[d]) { delete s.bad[d]; C.forget(s, 'bad/' + d); }
+    }, 'log');
     const st = S(), p = praiseOf(st, d, C.forecast(st, TODAY));
     buzz(p && p.tone === 'good' ? [12, 40, 12] : 10);
     after(before, p ? [[p.title + '. ' + p.text, p.tone === 'warn' ? 'warn' : 'good']] : []);
@@ -950,7 +1214,7 @@
       }
       case 'del-log': Store.update(s => { delete s.shifts[d]; C.forget(s, 'shifts/' + d); }, 'log'); clearDraft(); closeSheet(); toast('Запись удалена'); break;
       case 'set-plan': Store.update(s => { s.over[d] = +el.dataset.h; }, 'plan'); toast(+el.dataset.h ? `План на ${C.dateShort(d)}: ${el.dataset.h} ч` : `${C.dateShort(d)}: выходной`); break;
-      case 'clear-plan': Store.update(s => { delete s.over[d]; C.forget(s, 'over/' + d); }, 'plan'); break;
+      case 'clear-plan': Store.update(s => { delete s.over[d]; C.forget(s, 'over/' + d); if (s.bad && s.bad[d]) { delete s.bad[d]; C.forget(s, 'bad/' + d); } }, 'plan'); break;
       case 'tpl': tplSheet(+el.dataset.i, el.dataset.k || 'tpl'); break;
       case 'set-tpl': Store.update(s => { const k = el.dataset.k === 'preTpl' ? 'preTpl' : 'tpl'; s.set[k] = (s.set[k] || [0, 0, 0, 0, 0, 0, 0]).slice(); s.set[k][+el.dataset.i] = +el.dataset.h; }, 'tpl'); closeSheet(); break;
       case 'mood': { const before = snap(); Store.update(s => { s.mood = s.mood || {}; s.mood[TODAY] = +el.dataset.v; }, 'mood'); after(before, [[+el.dataset.v <= 2 ? 'Записал. Береги себя: сон и еда сейчас важнее лишнего часа.' : C.planHours(S(), TODAY) > 0 ? 'Записал. Хорошей смены.' : 'Записал. Хорошего дня.']]); break; }
@@ -1028,6 +1292,39 @@
         const c = C.CARS.find(x => x.id === el.dataset.id); if (!c) break;
         Store.update(s => { Object.assign(s.set, { price: c.price, down: c.down, v36: c.v36, l100: c.l100, repair: c.repair, lost: c.lost }); }, 'set');
         toast(`Машина: ${c.name}, ${c.how}. Прогноз пересчитан.`, 'good'); break;
+      }
+      case 'wif': UI.wif = !UI.wif; render(); break;
+      case 'cal': calSheet(); break;
+      case 'cal-ics': {
+        const m = model(), blob = new Blob([icsText(calEvents(m.st, m.fc))], { type: 'text/calendar;charset=utf-8' }), a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = 'put-k-kvartire.ics'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        toast('Файл календаря скачан. Открой его, чтобы добавить даты.'); break;
+      }
+      case 'diary-all': UI.diaryAll = true; render(); break;
+      case 'day-open': UI.tab = 'shifts'; UI.sel = d; UI.week = Math.round(C.isoDiff(C.monday(TODAY), C.monday(d)) / 7); clearDraft(); render(); window.scrollTo(0, 0); break;
+      case 'recap-share': shareRecap(); break;
+      case 'recap-ok': Store.update(s => { s.seen = Object.assign({}, s.seen, { recap: ((s.seen && s.seen.recap) || []).concat([el.dataset.v]).slice(-40) }); }, 'seen'); render(); break;
+      case 'live-start': {
+        Store.update(s => { s.live = { d: TODAY, start: Date.now(), brk: [] }; }, 'live');
+        buzz(20); toast(`Смена пошла. Напомню про перерыв через ${hm(BREAK_MIN)}, если приложение будет открыто.`, 'good'); break;
+      }
+      case 'live-pause': Store.update(s => { const L = s.live; if (!L) return; const now = Date.now(); if (L.on) { L.brk.push([L.on, now]); L.on = null; } else L.on = now; }, 'live'); break;
+      case 'live-stop': {
+        Store.update(s => { const L = s.live; if (!L) return; const now = Date.now(); if (L.on) { L.brk.push([L.on, now]); L.on = null; } L.end = now; }, 'live');
+        const L = S().live; if (L) logSheet(L.d, liveHours(L)); break;
+      }
+      case 'live-log': { const L = S().live; if (L) logSheet(L.d, liveHours(L)); break; }
+      case 'live-cancel': if (confirm('Сбросить таймер смены? Внесённое не пропадёт.')) Store.update(s => { s.live = null; }, 'live'); break;
+      case 'bad-day': badSheet(); break;
+      case 'bad-save': {
+        const reason = el.dataset.v, st0 = S(), g0 = (C.forecast(st0, TODAY).goal || {}).iso, frz = playerOf(st0, TODAY).freezes;
+        Store.update(s => {
+          s.over[TODAY] = 0; s.bad = s.bad || {}; s.bad[TODAY] = reason;
+          s.diary = s.diary || {}; if (!s.diary[TODAY]) s.diary[TODAY] = { text: 'Плохой день: ' + reason.toLowerCase(), u: Date.now() };
+        }, 'plan');
+        closeSheet();
+        const g1 = (C.forecast(S(), TODAY).goal || {}).iso, shift = g0 && g1 ? C.isoDiff(g0, g1) : 0;
+        toast(`Отдыхай. ${shift > 0 ? `Цель сдвинулась всего на ${C.daysText(shift)}.` : 'На цель почти не влияет.'}${frz > 0 ? ' Серию держит заморозка.' : ''}`, 'good'); break;
       }
       case 'car-buy': case 'car-edit': carSheet(); break;
       case 'car-how': case 'car-fuel': {
@@ -1216,6 +1513,15 @@
   });
   document.addEventListener('change', e => {
     const el = e.target;
+    if (el.id === 'p-note' && el.dataset.day) {
+      const d = el.dataset.day, text = el.value.trim().slice(0, 120);
+      Store.update(s => { s.diary = s.diary || {}; if (text) s.diary[d] = { text, u: Date.now() }; else if (s.diary[d]) { delete s.diary[d]; C.forget(s, 'diary/' + d); } }, 'field');
+      toast(text ? 'Записал в дневник' : 'Строчка удалена'); return;
+    }
+    if (el.dataset && el.dataset.wif) {
+      const on = UI.wifOn || (UI.wifOn = new Set()); if (el.checked) on.add(el.dataset.wif); else on.delete(el.dataset.wif);
+      const box = $('#wif-sum'); if (box) box.innerHTML = wifSum(model()); return;
+    }
     if (el.dataset && el.dataset.a === 'import' && el.files && el.files[0]) {
       const f = el.files[0]; el.value = ''; // тот же файл можно выбрать снова
       if (!confirm('Заменить все данные на этом телефоне' + (Store.cloud.user ? ' и в облаке' : '') + ' копией из файла? Сейчас на телефоне смен: ' + Object.keys(S().shifts).length + '.')) return;

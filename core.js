@@ -89,7 +89,7 @@ const Core = (() => {
   }
   function newState(t) {
     t = t || today();
-    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {}, car: null };
+    return { v: 1, created: t, updated: 0, set: Object.assign({}, DEF, datesFrom(t), { tpl: DEF.tpl.slice(), preTpl: DEF.preTpl.slice(), env: Object.assign({}, DEF.env), envPre: Object.assign({}, DEF.envPre) }), base: null, money: [], shifts: {}, over: {}, done: {}, quests: [], months: {}, mood: {}, del: {}, car: null, bad: {}, diary: {}, live: null };
   }
   function migrate(s) {
     if (!s || typeof s !== 'object') return newState();
@@ -105,7 +105,9 @@ const Core = (() => {
     if (!out.months || typeof out.months !== 'object') out.months = {};
     out.set.tpl = (out.set.tpl || DEF.tpl).slice(0, 7).map(x => +x || 0);
     while (out.set.tpl.length < 7) out.set.tpl.push(0);
-    for (const k of ['shifts', 'over', 'done', 'del']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
+    for (const k of ['shifts', 'over', 'done', 'del', 'bad', 'diary']) if (!out[k] || typeof out[k] !== 'object') out[k] = {};
+    // смена с таймером: {d, start, brk: [[с, по]], on (начало перерыва), end}
+    if (!out.live || typeof out.live !== 'object' || !out.live.d || !(out.live.start > 0)) out.live = null; else if (!Array.isArray(out.live.brk)) out.live.brk = [];
     // старые копии с целью без даты: день, когда поставил цель, не должен каждый день переезжать на сегодня
     if (out.set.why && !out.set.whyOn) out.set.whyOn = out.created;
     if (!Array.isArray(out.money)) out.money = [];
@@ -446,6 +448,21 @@ const Core = (() => {
   }
   // из них износ машины за день: в оценке он уменьшает цену машины, а не деньги
   const dayDep = (st, iso, m) => phaseAt(st, iso) === 'own' && m && (m.car || 0) > 0 ? Math.max(0, st.set.price - st.set.v36) / 36 / dim(mkOf(iso)) : 0;
+  // аренда или своя по твоим сменам за 30 дней: сколько осталось на аренде и сколько осталось бы на своей машине по плану
+  function rentVsOwn(st, iso) {
+    const g = st.set, from = isoAdd(iso, -30); let rent = 0, own = 0, n = 0, h = 0;
+    for (const [d, x] of Object.entries(st.shifts)) {
+      if (d <= from || d > iso || !x || !(x.h > 0) || !(x.app > 0) || phaseAt(st, d) !== 'rent') continue;
+      const mk = mkOf(d), fc = growth(g, mk)[0], gross = x.app / keepOf(g, 'rent');
+      rent += dayMoney(st, d, +x.h, +x.app).net;
+      own += gross * keepOf(g, 'own') - fuelPerHour(g, mk, 'own', g.fuel === 'gas') * x.h - g.wash26 / 26 * fc - (g.oil / g.oilKm + g.tires / g.tiresKm) * g.kmH * x.h * fc;
+      n++; h += +x.h;
+    }
+    if (n < 5) return null;
+    const fc = growth(g, mkOf(iso))[0], pay = g.down < 100 ? annuity(g.price * (1 - g.down / 100), g.rate / 100, g.months) : 0;
+    const ownFix = (g.phone + g.taxTech / 12 + g.battery + g.repair + (g.ogpo + g.osgop) / 12) * fc;
+    return { n, h, rent: rent - g.rentOther * fc, own: own - ownFix - pay, pay, start: startCost(g) };
+  }
   // оценка активов на сегодня: последняя отметка + смены после неё − постоянные расходы.
   // Считаем только до последней внесённой смены: дни без записей не тянут оценку вниз.
   // смена после сверки: позже по дате или в тот же день, но внесена позже
@@ -709,7 +726,7 @@ const Core = (() => {
     planHours, phaseOn, phaseOfMonth, monthPlan, keepOf, fuelPerHour, growth, annuity, carValue, startCost, workMonth, project,
     addMonths, loanRate, applyCar, loanPlan, payoffPreview, carNow,
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
-    phaseAt, shiftAfter, hasOv, moneyKey, forget, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
+    phaseAt, shiftAfter, hasOv, moneyKey, forget, rentVsOwn, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,
     milestones, otbYear, phaseNow, PHASES, dayMessage,
   };

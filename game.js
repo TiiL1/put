@@ -163,7 +163,7 @@ const Game = (() => {
       // серия с заморозками: каждые 14 смен подряд дают защиту от одного пропуска (не больше двух)
       const ice = rk(st, 'ice', d), every = 14 - 2 * ice, maxF = ice >= 3 ? 3 : 2;
       if (worked) { n++; since++; if (since >= every) { frz = Math.min(maxF, frz + 1); since = 0; } }
-      else if (p > 0 && past) { if (frz > 0) frz--; else { n = 0; since = 0; } }
+      else if ((p > 0 || (st.bad && st.bad[d] && C.planHours(st, d, true) > 0)) && past) { if (frz > 0) frz--; else { n = 0; since = 0; } }
       c.streakOn[d] = n;
       for (const t of [3, 7, 14, 30, 60, 100]) if (n >= t) mark('streak-' + t, d);
       if (n > c.best) c.best = n;
