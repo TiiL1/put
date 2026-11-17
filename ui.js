@@ -40,6 +40,12 @@ const Draw = (() => {
     trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20.5h7M9.5 17h5"/>',
     dl: '<path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/>',
     ul: '<path d="M12 20V9M7 13.5l5-5 5 5M5 4h14"/>',
+    heart: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.6 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/>',
+    snow: '<path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9"/><path d="M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5"/>',
+    battery: '<rect x="3" y="7.5" width="16" height="9" rx="2.5"/><path d="M21 10.5v3"/>',
+    chest: '<rect x="3.5" y="9" width="17" height="11" rx="2"/><path d="M3.5 13h17M5 9V7.5A3.5 3.5 0 0 1 8.5 4h7A3.5 3.5 0 0 1 19 7.5V9"/><rect x="10.5" y="11.5" width="3" height="3.5" rx="1"/>',
+    shield: '<path d="M12 3.5 19 6v5.5c0 4.4-3 7.7-7 9-4-1.3-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
     piggy: '<path d="M4 12.5c0-3.6 3.4-6 7.5-6 2.7 0 4.9 1 6.2 2.6l2.3-.6-.5 2.6c.5.8.8 1.6.8 2.6 0 1.5-.7 2.8-1.8 3.8V20h-3v-1.6c-1.2.3-2.6.4-4 .3V20h-3v-2.2C5.4 16.8 4 14.8 4 12.5z"/><path d="M10 6.6V5.4h3v1.2"/>',
   };
   const sprite = () => `<svg width="0" height="0" style="position:absolute" aria-hidden="true">${Object.entries(ICONS).map(([k, v]) => `<symbol id="i-${k}" viewBox="0 0 24 24">${v}</symbol>`).join('')}</svg>`;
@@ -60,7 +66,8 @@ const Draw = (() => {
   // ---------------------------------------------------------------- медаль достижения
   const MEDAL = {
     yellow: ['#FFC83D', '#B88308', '#4A3400'], orange: ['#FF9B3F', '#B85A12', '#FFF1DE'], green: ['#3DDC91', '#1C9A61', '#063A21'],
-    violet: ['#8E7DFF', '#5243CF', '#FFFFFF'], blue: ['#5AA8FF', '#2F6FC2', '#062242'], gold: ['#FFD86B', '#C98A12', '#3A2600'], locked: ['#262E4A', '#151B30', '#6F789A'],
+    violet: ['#8E7DFF', '#5243CF', '#FFFFFF'], blue: ['#5AA8FF', '#2F6FC2', '#062242'], gold: ['#FFD86B', '#C98A12', '#3A2600'], locked: ['#262E4A', '#151B30', '#7C86A6'],
+    bronze: ['#E39A5B', '#9A5A26', '#3A1C05'], silver: ['#D5DCEA', '#8A94AE', '#232A40'],
   };
   function medal(icon, color, locked, w) {
     const [face, lip, ink] = MEDAL[locked ? 'locked' : color] || MEDAL.violet;
@@ -184,6 +191,19 @@ const Draw = (() => {
       ${tg}</svg>`;
   }
 
+  // ---------------------------------------------------------------- квартира по плиткам
+  function tiles(n, total, start) {
+    const cols = 5, rows = Math.ceil(total / cols), w = 300, gap = 6, sz = (w - gap * (cols - 1)) / cols, h = rows * sz + (rows - 1) * gap;
+    let out = '';
+    for (let i = 0; i < total; i++) {
+      const x = (i % cols) * (sz + gap), y = Math.floor(i / cols) * (sz + gap), on = i < n, next = i === n, old = i < start;
+      out += `<rect x="${f1(x)}" y="${f1(y)}" width="${f1(sz)}" height="${f1(sz)}" rx="9" fill="${on ? (old ? '#B98E2E' : 'url(#tlG)') : next ? 'rgba(255,200,61,.10)' : '#1A2140'}" stroke="${next ? '#FFC83D' : on ? 'rgba(255,255,255,.25)' : 'rgba(255,255,255,.06)'}" stroke-width="${next ? 2 : 1}" ${next ? 'stroke-dasharray="5 4"' : ''}/>`;
+      if (on && !old) out += `<rect x="${f1(x + 6)}" y="${f1(y + 5)}" width="${f1(sz - 12)}" height="4" rx="2" fill="rgba(255,255,255,.35)"/>`;
+    }
+    return `<svg class="tiles-svg" viewBox="-2 -2 ${w + 4} ${f1(h + 4)}" role="img" aria-label="Плиток ${n} из ${total}">
+      <defs><linearGradient id="tlG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE08A"/><stop offset="1" stop-color="#FFB21F"/></linearGradient></defs>${out}</svg>`;
+  }
+
   // ---------------------------------------------------------------- искры для праздника
   function sparks(n) {
     const colors = ['#FFC83D', '#8E7DFF', '#3DDC91', '#FF9B3F', '#5AA8FF'];
@@ -195,5 +215,5 @@ const Draw = (() => {
     return out;
   }
 
-  return { sprite, ic, hex, medal, gauge, road, carIcon, sparks };
+  return { sprite, ic, hex, medal, gauge, road, carIcon, sparks, tiles };
 })();
