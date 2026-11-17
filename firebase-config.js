@@ -1,0 +1,9 @@
+/* Настройки Firebase (публичные, как у Моих финансов): только адрес базы, не секрет. */
+window.PUT_FIREBASE = {
+ "apiKey": "AIzaSyCuaQ0Bzi8EWOp9Mr0u9l7KJZKlXvnQSsE",
+ "authDomain": "moi-finansymoi-finansy.firebaseapp.com",
+ "projectId": "moi-finansymoi-finansy",
+ "storageBucket": "moi-finansymoi-finansy.firebasestorage.app",
+ "messagingSenderId": "412843537432",
+ "appId": "1:412843537432:web:2572d69e6705831f973f6d"
+};
