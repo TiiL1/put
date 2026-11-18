@@ -1,5 +1,5 @@
 /* Путь к квартире: офлайн. Сначала отдаём из кэша (открывается сразу), в фоне обновляем файлы. */
-const VERSION = 'put-20261118024256';
+const VERSION = 'put-20261118143055';
 const SHELL = ['./', 'index.html', 'styles.css', 'core.js', 'game.js', 'ui.js', 'store.js', 'app.js', 'firebase-config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'badge-72.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(VERSION).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));

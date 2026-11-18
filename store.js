@@ -64,7 +64,8 @@ const Store = (() => {
   // ---------------------------------------------------------------- резервная копия файлом
   function exportFile() {
     flush();
-    const blob = new Blob([JSON.stringify(state, null, 1)], { type: 'application/json' });
+    // код от заметок в файл не кладём: файл легко переслать, а код живёт в аккаунте
+    const blob = new Blob([JSON.stringify(Object.assign({}, state, { kb: null }), null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'put-k-kvartire-' + Core.today() + '.json';
@@ -74,7 +75,9 @@ const Store = (() => {
   function importText(text) {
     const s = JSON.parse(text);
     if (!s || typeof s !== 'object' || !s.set) throw new Error('Это не файл приложения');
-    replace(Object.assign(s, { updated: Math.max(Date.now(), ((state && state.updated) || 0) + 1), dev: device, seen: seenOf(state && state.seen, s.seen) }), 'import');
+    // старая копия без кода заметок не стирает код с телефона и из облака
+    const kb = [s.kb, state && state.kb].filter(x => x && typeof x.k === 'string').sort((x, y) => (y.u || 0) - (x.u || 0))[0] || null;
+    replace(Object.assign(s, { updated: Math.max(Date.now(), ((state && state.updated) || 0) + 1), dev: device, seen: seenOf(state && state.seen, s.seen), kb }), 'import');
     schedulePush();
   }
 
@@ -161,6 +164,9 @@ const Store = (() => {
     // своя машина: берём ту, что правили позже; удалённая не возвращается
     const cars = [a.car, b.car].filter(c => c && c.on && (c.u || 0) > (del.car || 0)).sort((x, y) => (x.u || 0) - (y.u || 0));
     out.car = cars.length ? cars[cars.length - 1] : null;
+    // ключ к заметкам из Ноушена: берём тот, что сохранили позже
+    const kbs = [a.kb, b.kb].filter(x => x && typeof x.k === 'string').sort((x, y) => (x.u || 0) - (y.u || 0));
+    out.kb = kbs.length ? kbs[kbs.length - 1] : null;
     // таймер смены: берём тот, что меняли позже; сброшенный или уже внесённый не возвращается
     const lives = [a.live, b.live].filter(L => L && L.start && (L.u || L.start) > (del.live || 0)).sort((x, y) => (x.u || x.start) - (y.u || y.start));
     const L = lives.length ? lives[lives.length - 1] : null;

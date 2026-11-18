@@ -480,6 +480,7 @@
     }
   }
   setInterval(liveTick, 30000);
+  window.addEventListener('online', () => { if (KB.err === 'net') { KB.err = null; KB.errK = null; if (UI.sub === 'kb') render(); } });
   // вернулся в приложение: события из шторки, таймер и сама шторка (её могли смахнуть или телефон перезагрузился)
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { inboxApply().then(shadeShow); liveTick(); } });
   // ---------------------------------------------------------------- смена в шторке телефона
@@ -784,12 +785,12 @@
     const ds = Array.from({ length: 7 }, (_, i) => C.isoAdd(mon, i));
     if (!UI.sel || UI.sel < mon || UI.sel > ds[6]) { UI.sel = ds.indexOf(TODAY) >= 0 ? TODAY : ds[0]; UI.dh = null; UI.dapp = ''; UI.dord = ''; }
     const wk = C.weekStats(st, mon, fc, TODAY), mk = C.mkOf(UI.week === 0 ? TODAY : mon), mo = C.monthStats(st, mk, fc, TODAY), planAll = weekPlan(st, mon);
-    const mr = C.measuredR(st, TODAY, 120), sc = C.scenarioOf(mr.n >= 3 ? mr.R : null), scHint = sc ? SC_HINT[C.phaseOn(st.set, TODAY) === 'own' ? 'own' : 'rent'][sc.key] : '';
+    const mr = C.measuredR(st, TODAY, 120), sc = C.scenarioOf(mr.n >= 3 ? mr.R : null), scHint = sc ? scHintOf(st, C.phaseOn(st.set, TODAY) === 'own' ? 'own' : 'rent', sc.key) : '';
     const label = UI.week === 0 ? 'Эта неделя' : UI.week === -1 ? 'Прошлая неделя' : UI.week === 1 ? 'Следующая неделя' : 'Неделя';
     const closed = planAll > 0 && wk.fact >= planAll && ds[6] < TODAY;
     const preNow = !st.set.taxiFrom || TODAY < st.set.taxiFrom, tplKey = preNow ? 'preTpl' : 'tpl', tpl = st.set[tplKey] || [];
     return `
-    <header class="top"><div><div class="top-k">Смены</div><h1 class="top-t">${label}</h1></div><div class="top-r">${streakPill(pl)}</div></header>
+    <header class="top"><div><div class="top-k">Смены</div><h1 class="top-t top-fit">${label}</h1></div><div class="top-r">${streakPill(pl)}</div></header>
     <section class="card">
       <div class="between"><div class="over">${+mon.slice(8)}${mon.slice(5, 7) !== ds[6].slice(5, 7) ? ' ' + C.dateShort(mon).split(' ')[1] : ''}–${C.dateShort(ds[6])}</div>
         <div class="top-r"><button class="icon-btn" data-a="week" data-v="-1" aria-label="Неделя назад">${ic('left')}</button><button class="icon-btn" data-a="week" data-v="1" aria-label="Неделя вперёд">${ic('right')}</button></div></div>
@@ -799,7 +800,8 @@
     </section>
     ${dayPanel(st, UI.sel, fc)}
     ${UI.week === 0 ? bossCard(pl) : ''}
-    <section class="card"><div class="over">${cap(C.MON[+mk.slice(5) - 1])}</div>${statsBlock(mo)}</section>
+    <section class="card"><div class="over">${cap(C.MON[+mk.slice(5) - 1])}</div>${statsBlock(mo)}
+      <button class="row-btn st-more" data-a="stats">${ic('chart')}<span>Все цифры</span>${ic('right')}</button></section>
     ${mr.n >= 3 ? `<section class="card"><div class="over">Твоя выручка в такси</div>
       <p class="lead">За 12 ч в приложении в среднем <b>${C.money(C.appPer12(st, TODAY, mr.R) || 0)}</b>.${sc ? ` Это ${esc(scHint)}.` : ''}</p>
       <div class="sub">По последним ${mr.n} ${C.plural(mr.n, ['смене', 'сменам', 'сменам'])}${st.set.rLog && mr.n >= 10 ? '. Прогноз уже считается по ним.' : '. С 10 смен прогноз начнёт считаться по ним.'}</div></section>` : ''}
@@ -809,9 +811,11 @@
   }
   // что значит выручка: на аренде и на своей машине по-разному (план считается по надёжному сценарию)
   const SC_HINT = {
-    rent: { bad: 'ниже плана: на аренде в минус, нужна своя машина, газ и 7/0', reliable: 'как в плане: на аренде почти ничего не остаётся, своя машина как можно раньше', mid: 'лучше плана: на аренде уже можно понемногу копить', good: 'намного лучше плана: можно копить и на аренде' },
-    own: { bad: 'ниже плана, догнать помогут газ и 7/0', reliable: 'как в плане', mid: 'лучше плана', good: 'намного лучше плана' },
+    rent: { bad: 'ниже плана: на аренде в минус, нужны своя машина и газ', reliable: 'как в плане: на аренде почти ничего не остаётся, своя машина как можно раньше', mid: 'лучше плана: на аренде уже можно понемногу копить', good: 'намного лучше плана: можно копить и на аренде' },
+    own: { badGas: 'ниже плана: смотри часы пик и районы', bad: 'ниже плана, догнать поможет газ', reliable: 'как в плане', mid: 'лучше плана', good: 'намного лучше плана' },
   };
+  // газ уже стоит: советовать его не нужно
+  const scHintOf = (st, ph, key) => ph === 'own' && key === 'bad' && st.set.fuel === 'gas' && (!st.set.gasFrom || st.set.gasFrom <= TODAY) ? SC_HINT.own.badGas : SC_HINT[ph][key];
   function barCol(st, d) {
     const p = C.planHours(st, d), x = st.shifts[d], h = x ? +x.h : null, future = d > TODAY, k = 104 / 16;
     const cls = (d === TODAY ? ' today' : '') + (d === UI.sel && d !== TODAY ? ' sel' : '');
@@ -1079,7 +1083,7 @@
     const Q = G.quests(st, TODAY, m.fc), nx = R.next;
     const nxt = nx ? (nx.key === 'loan' ? 'кредит закрыт' : nx.key === 'goal' ? C.money(m.target) + ' активов' : nx.key === 'otb' ? 'депозиту Отбасы 3 года' : nx.title.toLowerCase()) : '';
     return `
-    <header class="top"><div><div class="top-k">Путь</div><h1 class="top-t">Этап ${ph.n} из ${ph.total}</h1></div></header>
+    <header class="top"><div><div class="top-k">Путь</div><h1 class="top-t">Этап ${ph.n} из ${ph.total}</h1></div><div class="top-r"><button class="icon-btn" data-a="kb" aria-label="Заметки из Ноушена">${ic('book')}</button></div></header>
     <section class="road-card"><div class="road-head"><div class="ibox violet">${ic('route')}</div><div><div class="road-k">Сейчас</div><div class="road-t">${esc(ph.title)}</div></div></div>
       ${D.road(R.L, R.car, m.pl.skin, null)}
       <div class="stages" style="margin:10px 18px 0">${C.PHASES.map((_, i) => `<i class="${i + 1 < ph.n ? 'done' : i + 1 === ph.n ? 'now' : ''}"></i>`).join('')}</div>
@@ -1088,6 +1092,7 @@
       <p class="lead">${m.na >= m.target ? 'Цель уже есть.' : ex === 0 ? `Успеваешь с запасом <b>${days(m.need.slackDays)}</b>.` : ex ? `Добавь <b>${C.num1(ex)} ч в неделю</b> к обычному графику.` : m.need.capped ? `Больше ${m.need.cap} ч в неделю не советую, это потолок из настроек. Помогут газ, своя машина раньше или меньше расходов: их цену видно в Что если на Главной.` : 'Одних часов мало. Помогут газ, своя машина раньше или меньше расходов.'}</p>
       <div class="years">${yrs}</div></section>
     ${locksCard(m)}
+    <button class="card tap block kb-entry" data-a="kb"><span class="kb-ic">${ic('book')}</span><span><b>Заметки из Ноушена</b><small>Итоги, сроки и исследования: 8 страниц и 18 таблиц</small></span>${ic('right')}</button>
     <div class="sec-h"><div class="h3">Задания</div><span class="link">${Q.open.length}</span></div>
     <section class="card">${Q.open.map(q => questRow(q, false)).join('') || '<p class="lead">Все задания сделаны.</p>'}
       <button class="add-q" data-a="quest-new">${ic('plus')}Своё задание</button></section>
@@ -1147,6 +1152,358 @@
       ${!compact && q.own ? `<button class="quest-x" data-a="quest-del" data-id="${esc(q.id)}">Удалить задание</button>` : ''}</div></div>`;
   }
 
+  // ---------------------------------------------------------------- заметки из Ноушена
+  // На сайте они лежат зашифрованными (kb.bin). Ключ хранится в состоянии владельца и уходит в его облако,
+  // поэтому заметки открываются там, где он вошёл через Google. Код нужен один раз, на любом из его устройств
+  const KB = { data: null, err: null, errK: null, busy: false, q: '', open: {}, shown: {}, dbq: {}, det: new Set() };
+  const b64u = u8 => { let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+  // код: русские буквы, похожие на латинские, считаем латинскими (набрал на русской раскладке, и всё равно подойдёт)
+  const LAT = { 'А': 'A', 'В': 'B', 'С': 'C', 'Е': 'E', 'Н': 'H', 'К': 'K', 'М': 'M', 'Р': 'P', 'Т': 'T', 'Х': 'X', 'У': 'Y', 'З': '3' };
+  const kbCode = s => String(s || '').toUpperCase().replace(/[А-ЯЁ]/g, c => LAT[c] || c).replace(/[^A-Z0-9]/g, '').slice(0, 16);
+  // код в ключ: те же соль и число проходов, что в kb_build.py
+  async function kbKeyOf(code) {
+    const enc = new TextEncoder(), norm = kbCode(code);
+    const base = await crypto.subtle.importKey('raw', enc.encode(norm), 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: enc.encode('put-kb-v1'), iterations: 200000 }, base, 256));
+  }
+  async function kbDecrypt(raw) {
+    if (typeof DecompressionStream === 'undefined') throw new Error('old');
+    let r, buf;
+    try { r = await fetch('kb.bin'); } catch (e) { throw new Error('net'); }
+    if (r.status === 404) throw new Error('none');
+    try { if (!r.ok) throw 0; buf = new Uint8Array(await r.arrayBuffer()); } catch (e) { throw new Error('net'); }
+    if (buf.length < 40 || String.fromCharCode.apply(null, buf.subarray(0, 6)) !== 'PUTKB1') throw new Error('net'); // без сети вместо файла приходит страница
+    let plain;
+    try { const key = await crypto.subtle.importKey('raw', raw, 'AES-GCM', false, ['decrypt']); plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.subarray(6, 18) }, key, buf.subarray(18)); } catch (e) { throw new Error('key'); }
+    const txt = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+    return kbIndex(JSON.parse(txt));
+  }
+  const kbPlain = s => String(s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*/g, '').replace(/`/g, '');
+  const kbLow = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/\u00a0/g, ' ').replace(/\u2011/g, '-');
+  // запрос «72900» ищет и «72 900»: суммы в заметках записаны с пробелами
+  const kbQs = q => { const g = q.replace(/\d{4,}/g, d => d.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')); return g !== q ? [q, g] : [q]; };
+  const kbFind = (low, qs, from) => { let at = -1, len = 0; for (const x of qs) { const i = low.indexOf(x, from); if (i >= 0 && (at < 0 || i < at)) { at = i; len = x.length; } } return [at, len]; };
+  const kbHas = (low, qs) => qs.some(x => low.indexOf(x) >= 0);
+  function kbWalk(bs, f) {
+    for (const b of bs || []) {
+      f(b);
+      if (b.t === 'cols') b.c.forEach(col => kbWalk(col, f)); else if (Array.isArray(b.c)) kbWalk(b.c, f);
+      for (const it of b.items || []) { f({ t: 'li', x: it.x }); kbWalk(it.c, f); }
+    }
+  }
+  // для поиска: текст каждой заметки и каждой строки таблиц
+  function kbIndex(d) {
+    for (const n of d.notes) {
+      const parts = []; let h = 0;
+      n.dbs = [];
+      kbWalk(n.blocks, b => {
+        if (b.t === 'h') b.id = 'kh' + n.id + (h++);
+        if (b.t === 'db') n.dbs.push(b.db);
+        if (b.x) parts.push(kbPlain(b.x));
+        if (b.rows) for (const r of b.rows) parts.push(r.map(kbPlain).join(' · '));
+      });
+      n.txt = parts.join('\n'); n.low = kbLow(n.txt); n.heads = h;
+    }
+    for (const db of Object.values(d.dbs)) db.low = db.rows.map(r => kbLow(r.join(' · ')));
+    d.byId = {}; for (const n of d.notes) d.byId[n.id] = n;
+    return d;
+  }
+  function kbEnsure() {
+    const st = S(), k = st.kb && st.kb.k;
+    if (KB.data || KB.busy || !k || (KB.err && KB.errK === k)) return;
+    KB.busy = true;
+    kbDecrypt(unb64u(k)).then(d => { KB.data = d; KB.err = null; }).catch(e => { KB.err = ['key', 'none', 'old'].indexOf(e.message) >= 0 ? e.message : 'net'; KB.errK = k; })
+      .finally(() => { KB.busy = false; if (UI.sub === 'kb') render(); });
+  }
+  async function kbUnlock() {
+    const inp = $('#kb-code'), code = inp ? inp.value : '', btn = document.querySelector('[data-a="kb-unlock"]');
+    if (kbCode(code).length < 16) { toast('Впиши код целиком: 16 букв и цифр', 'warn'); return; }
+    if (btn) btn.disabled = true;
+    try {
+      const raw = await kbKeyOf(code), d = await kbDecrypt(raw);
+      KB.data = d; KB.err = null; KB.errK = null;
+      const uid = Store.cloud && Store.cloud.user ? Store.cloud.user.uid || null : null;
+      Store.update(s => { s.kb = { k: b64u(raw), u: Math.max(Date.now(), ((s.kb && s.kb.u) || 0) + 1), uid }; }, 'kb');
+      toast('Заметки открыты. Код сохранён в твоём аккаунте: на других устройствах они откроются сами.', 'good'); buzz([12, 40, 12]);
+    } catch (e) { toast(KB_ERR[e.message] || KB_ERR.net, 'warn'); }
+    finally { if (btn) btn.disabled = false; }
+  }
+  const KB_ERR = { key: 'Код не подошёл. Проверь буквы и цифры.', none: 'Заметок пока нет на сайте.', old: 'Браузер устарел: обнови его, и заметки откроются.', net: 'Нет связи. Попробуй, когда появится интернет.' };
+  // числа и единицы не рвутся на строки: 3 000 ₸, 12 ч, 9,6-12 млн. Ссылки не трогаем
+  const kbNb = h => h.replace(/(\d) (?=\d{3}(?!\d))/g, '$1\u00a0').replace(/(\d) (₸|%|млн|тыс|км|мес|ч(?![а-яё])|л(?![а-яё]))/g, '$1\u00a0$2').replace(/(млн|тыс\.?) ₸/g, '$1\u00a0₸').replace(/(\d)-(\d)/g, '$1\u2011$2');
+  const kbLink = (t, u) => u.slice(0, 3) === '#n:' ? `<a class="kb-ln" data-a="kb-note" data-id="${u.slice(3)}">${t}</a>` : u.slice(0, 3) === '#d:' ? `<a class="kb-ln" data-a="kb-dbgo" data-id="${u.slice(3)}">${t}</a>`
+    : /^https?:\/\//.test(u) ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>` : t;
+  // текст из Ноушена: жирный, код, ссылки (свои страницы и таблицы открываются внутри приложения)
+  const kbMd = s => {
+    const e = esc(s), re = /\[([^\]]*)\]\(([^)\s]+)\)/g; let out = '', pos = 0, m;
+    while ((m = re.exec(e))) { out += kbNb(e.slice(pos, m.index)) + kbLink(kbNb(m[1]), m[2]); pos = re.lastIndex; }
+    return (out + kbNb(e.slice(pos))).replace(/\*\*([^*]+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+?)`/g, '<code>$1</code>').replace(/\n/g, '<br>');
+  };
+  const kbCut = (s, n) => s.length > n ? s.slice(0, n - 1).replace(/[\s,.;:]+$/, '') + '…' : s;
+  // совпадения поиска подсвечены
+  function kbMark(text, qs) {
+    if (!qs || !qs[0]) return esc(text);
+    const low = kbLow(text); let out = '', pos = 0, [at, len] = kbFind(low, qs, 0);
+    while (at >= 0) { out += esc(text.slice(pos, at)) + '<mark>' + esc(text.slice(at, at + len)) + '</mark>'; pos = at + len; [at, len] = kbFind(low, qs, pos); }
+    return out + esc(text.slice(pos));
+  }
+  const kbMeta = n => [n.heads ? n.heads + ' ' + C.plural(n.heads, ['раздел', 'раздела', 'разделов']) : '', n.dbs.length ? n.dbs.length + ' ' + C.plural(n.dbs.length, ['таблица', 'таблицы', 'таблиц']) : ''].filter(Boolean).join(' · ');
+  function kbBlocks(bs) {
+    return (bs || []).map(b => {
+      if (b.t === 'h') return b.l === 3 ? `<h4 id="${b.id}">${kbMd(b.x)}</h4>` : `<h3 id="${b.id}">${kbMd(b.x)}</h3>`;
+      if (b.t === 'p') return `<p>${kbMd(b.x)}</p>`;
+      if (b.t === 'ul' || b.t === 'ol') return `<${b.t}>${b.items.map(it => `<li>${kbMd(it.x)}${it.c ? kbBlocks(it.c) : ''}</li>`).join('')}</${b.t}>`;
+      if (b.t === 'todo') return `<ul class="kb-todo">${b.items.map(it => `<li class="${it.done ? 'on' : ''}"><i>${it.done ? ic('check') : ''}</i><span>${kbMd(it.x)}</span></li>`).join('')}</ul>`;
+      if (b.t === 'call') return `<div class="kb-call">${b.i ? `<span class="kb-call-i">${esc(b.i)}</span>` : ''}<div>${kbBlocks(b.c)}</div></div>`;
+      if (b.t === 'quote') return `<blockquote>${kbMd(b.x)}</blockquote>`;
+      if (b.t === 'table') return `<div class="kb-tw"><table class="kb-t${b.rows[0].length > 2 ? ' wide' : ''}">${b.rows.map((r, i) => `<tr>${r.map((c, j) => i === 0 ? `<th>${kbMd(c)}</th>` : j === 0 ? `<th scope="row">${kbMd(c)}</th>` : `<td>${kbMd(c)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+      if (b.t === 'cols') return `<div class="kb-cols">${b.c.map(col => `<div>${kbBlocks(col)}</div>`).join('')}</div>`;
+      if (b.t === 'hr') return '<hr>';
+      if (b.t === 'db') return kbDb(b.db);
+      if (b.t === 'link') return `<button class="kb-pl" data-a="kb-note" data-id="${b.n}">${ic('book')}<span>${esc(b.x)}</span>${ic('right')}</button>`;
+      if (b.t === 'tog') return `<details class="kb-tog"><summary>${kbMd(b.x)}</summary>${kbBlocks(b.c)}</details>`;
+      return '';
+    }).join('');
+  }
+  // таблица из Ноушена: закрыта, пока не нажал; строки карточками, поиск внутри, подробности по нажатию
+  function kbDb(id) {
+    const db = KB.data.dbs[id]; if (!db) return '';
+    const open = !!KB.open[id], n = db.rows.length;
+    return `<div class="kb-db${open ? ' open' : ''}" id="db-${id}"><button class="kb-db-h" data-a="kb-dbt" data-id="${id}" aria-expanded="${open}">${ic('grid')}<span><b>${esc(db.title)}</b><small>${C.grp(n)} ${C.plural(n, ['строка', 'строки', 'строк'])}</small></span><i class="kb-chev">${ic('right')}</i></button>
+      ${open ? `<div class="kb-db-b">${n > 8 || KB.dbq[id] ? `<label class="kb-search sm">${ic('search')}<input type="search" data-dbq="${id}" placeholder="Поиск в таблице" value="${esc(KB.dbq[id] || '')}" autocomplete="off"></label>` : ''}<div class="kb-rows" id="rows-${id}">${kbRows(id)}</div></div>` : ''}</div>`;
+  }
+  const kbDbQs = id => { const q = kbLow((KB.dbq[id] || '').trim()); return q ? kbQs(q) : null; };
+  const kbRowsOf = id => { const db = KB.data.dbs[id], qs = kbDbQs(id), out = []; for (let i = 0; i < db.rows.length; i++) if (!qs || kbHas(db.low[i], qs)) out.push(i); return out; };
+  function kbRows(id) {
+    const list = kbRowsOf(id), n = KB.shown[id] || 20, qs = kbDbQs(id);
+    return (list.length ? list.slice(0, n).map(i => kbRowCard(id, i, qs)).join('') : '<p class="sub kb-hint">Ничего не нашлось</p>')
+      + (list.length > n ? `<button class="btn ghost sm" data-a="kb-more" data-id="${id}">Показать ещё ${Math.min(20, list.length - n)} из ${list.length - n}</button>` : '');
+  }
+  // карточка строки: заголовок целиком (в закрытой три строки), плашки с подписью; то, что уже в заголовке, не повторяем
+  function kbRowCard(id, i, qs) {
+    const db = KB.data.dbs[id], r = db.rows[i], tc = db.tc.length ? db.tc : [0], open = KB.det.has(id + ':' + i);
+    const title = tc.map(k => r[k]).filter(Boolean).join(' · ') || r.find(Boolean) || '';
+    const chips = db.cc.filter(([k]) => r[k] && tc.indexOf(k) < 0 && title.indexOf(r[k]) < 0).map(([k, pre, suf, u]) => `<span>${kbNb(esc(kbCut(pre + r[k] + suf + (u >= 0 && r[u] ? ' ' + r[u] : ''), 34)))}</span>`).join('');
+    return `<button class="kb-row" data-a="kb-row" data-db="${id}" data-i="${i}" aria-expanded="${open}"><b>${kbMark(title, qs)}</b>${chips ? `<span class="kb-chips">${chips}</span>` : ''}</button>${open ? kbRowDet(id, i) : ''}`;
+  }
+  // ссылки в ячейках: без хвостовых скобок и запятых; обрезанные (с …) не ссылки
+  const kbCell = v => {
+    if (/^https?:\/\/\S+$/.test(v) && v.indexOf('…') < 0) return `<a href="${esc(v)}" target="_blank" rel="noopener noreferrer">${esc(kbCut(v.replace(/^https?:\/\/(www\.)?/, ''), 48))}</a>`;
+    const re = /https?:\/\/[^\s<>"]*[^\s<>"),.;:\]…]/g; let out = '', pos = 0, m;
+    while ((m = re.exec(v))) { const u = m[0], cut = v.charAt(re.lastIndex) === '…'; out += kbNb(esc(v.slice(pos, m.index))) + (cut ? esc(u) : `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`); pos = re.lastIndex; }
+    return (out + kbNb(esc(v.slice(pos)))).replace(/\n/g, '<br>');
+  };
+  // подробности строки: все поля, кроме тех, что уже в заголовке карточки
+  const kbRowDet = (id, i) => { const db = KB.data.dbs[id], r = db.rows[i], tc = db.tc.length ? db.tc : [0]; return `<div class="kb-det">${db.head.map((h, k) => r[k] && tc.indexOf(k) < 0 ? `<div><span>${esc(h)}</span><p>${kbCell(r[k])}</p></div>` : '').join('')}</div>`; };
+  // поиск по всем заметкам и таблицам
+  function kbSnip(n, at, len, qs) {
+    const a = Math.max(0, at - 50), b = Math.min(n.txt.length, at + len + 80), seg = n.txt.slice(a, b).replace(/\s+/g, ' ');
+    return (a > 0 ? '…' : '') + kbMark(seg, qs) + (b < n.txt.length ? '…' : '');
+  }
+  function kbResults(q0) {
+    const q = kbLow(q0.trim()); if (q.length < 2) return '<p class="sub kb-hint">Напиши хотя бы две буквы</p>';
+    const d = KB.data, out = [], qs = kbQs(q);
+    for (const n of d.notes) {
+      let k = 0, [at, len] = kbFind(n.low, qs, 0); const snips = [];
+      while (at >= 0) { if (!snips.length || (snips.length < 2 && at - snips[0].at > 160)) snips.push({ at, len, k }); k++; [at, len] = kbFind(n.low, qs, at + len); }
+      const dbHits = n.dbs.map(id => ({ id, k: d.dbs[id].low.filter(x => kbHas(x, qs)).length })).filter(x => x.k);
+      if (k || dbHits.length) out.push({ n, k, snips, dbHits, w: k + dbHits.reduce((s, x) => s + x.k, 0) / 10 });
+    }
+    if (!out.length) return `<p class="sub kb-hint">Ничего не нашлось</p>`;
+    return out.sort((a, b) => b.w - a.w).map(({ n, k, snips, dbHits }) => `<section class="card kb-hit">
+      <button class="kb-hit-h" data-a="kb-note" data-id="${n.id}" data-hl="1"><b>${esc(n.short)}</b><small>${k ? k + ' ' + C.plural(k, ['совпадение', 'совпадения', 'совпадений']) : 'в таблицах'}</small></button>
+      ${snips.map(x => `<button class="kb-snip" data-a="kb-note" data-id="${n.id}" data-hl="1" data-k="${x.k}">${kbSnip(n, x.at, x.len, qs)}</button>`).join('')}
+      ${dbHits.map(x => `<button class="kb-hit-db" data-a="kb-dbgo" data-id="${x.id}" data-q="1">${ic('grid')}<span>${esc(d.dbs[x.id].title)}</span><em>${x.k} ${C.plural(x.k, ['строка', 'строки', 'строк'])}</em></button>`).join('')}</section>`).join('');
+  }
+  const kbItem = n => `<button class="kb-item" data-a="kb-note" data-id="${n.id}"><span class="kb-ic">${ic(n.icon)}</span><span class="kb-it"><b>${esc(n.short)}</b><small>${esc(n.lead)}</small><em>${kbMeta(n)}</em></span>${ic('right')}</button>`;
+  function kbList() {
+    const d = KB.data, main = d.byId.main, rows = Object.values(d.dbs).reduce((s, x) => s + x.rows.length, 0), q = KB.q.trim();
+    return `<label class="kb-search">${ic('search')}<input id="kb-q" type="search" placeholder="Поиск по заметкам и таблицам" value="${esc(KB.q)}" autocomplete="off"></label>
+      <div id="kb-res">${q ? kbResults(q) : ''}</div>
+      <div id="kb-home"${q ? ' hidden' : ''}>
+        ${main ? `<button class="kb-hero" data-a="kb-note" data-id="main"><div class="over">Главное</div><b>${esc(main.short)}</b><p>${esc(main.lead)}</p><span class="kb-go">Читать ${ic('right')}</span></button>` : ''}
+        ${['Итоги', 'Планы и сроки', 'Исследования'].map(g => { const list = d.notes.filter(n => n.group === g && n.id !== 'main'); return list.length ? `<div class="sec-h"><div class="h3">${g}</div></div><section class="card kb-list">${list.map(kbItem).join('')}</section>` : ''; }).join('')}
+        <p class="sub kb-foot">Копия страниц Ноушена: ${d.notes.length} ${C.plural(d.notes.length, ['страница', 'страницы', 'страниц'])} и ${Object.keys(d.dbs).length} ${C.plural(Object.keys(d.dbs).length, ['таблица', 'таблицы', 'таблиц'])}, ${C.grp(rows)} ${C.plural(rows, ['строка', 'строки', 'строк'])}.</p>
+      </div>`;
+  }
+  function kbNoteView(n) {
+    const hs = []; kbWalk(n.blocks, b => { if (b.t === 'h' && b.l === 2) hs.push(b); });
+    const i = KB.data.notes.indexOf(n), next = KB.data.notes[(i + 1) % KB.data.notes.length];
+    return `<article class="kb-note"><h1 class="kb-title">${esc(n.title)}</h1>${kbMeta(n) ? `<div class="kb-meta">${kbMeta(n)}</div>` : ''}
+      ${hs.length >= 4 ? `<div class="kb-toc">${hs.map(h => `<button data-a="kb-to" data-v="${h.id}">${esc(kbCut(kbPlain(h.x), 40))}</button>`).join('')}</div>` : ''}
+      <div class="kb-body">${kbBlocks(n.blocks)}</div>
+      ${next && next !== n ? `<button class="kb-next" data-a="kb-note" data-id="${next.id}"><span><small>Дальше</small><b>${esc(next.short)}</b></span>${ic('right')}</button>` : ''}</article>`;
+  }
+  function kbLock(signed, waiting, bad, other) {
+    const mail = Store.cloud && Store.cloud.user && Store.cloud.user.email;
+    return `<section class="card kb-lock"><div class="kb-lock-i">${ic('lock')}</div>
+      <div class="h3">${bad ? 'Заметки обновились' : other ? 'Заметки привязаны к другому аккаунту' : 'Заметки привязаны к твоему Google\u2011аккаунту'}</div>
+      ${waiting ? '<p class="sub">Подключаюсь к аккаунту…</p>' : signed ? `<p class="sub">${bad ? 'Старый код к ним не подходит. Введи новый один раз.' : other ? 'Код от заметок сохранён в другом аккаунте. Введи его здесь, если это твой.' : 'Введи код один раз на любом устройстве, где ты вошёл. Он сохранится в твоём аккаунте, и на остальных заметки откроются сами.'}</p>
+        ${mail ? `<p class="sub kb-mail">${ic('cloud')}<span>${esc(mail)}</span></p>` : ''}
+        <label class="fld"><span>Код заметок</span><input id="kb-code" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-XXXX"></label>
+        <div class="btns"><button class="btn" data-a="kb-unlock">${ic('unlock')}Открыть заметки</button></div>`
+      : `<p class="sub">Войди через Google тем же аккаунтом, что и обычно. Если код уже вводил, заметки откроются сами.</p><div class="btns"><button class="btn" data-a="signin">${ic('cloud')}Войти через Google</button></div>`}</section>`;
+  }
+  function vKb() {
+    const st = S(), cl = Store.cloud || {}, key = st.kb && st.kb.k, n = KB.data && UI.kbNote ? KB.data.byId[UI.kbNote] : null;
+    // без интернета SDK входа не грузится, но телефон всё ещё вошёл (cl.on): заметки открываются по сохранённому коду
+    const offline = !cl.user && cl.on && (navigator.onLine === false || cl.status === 'error'), signed = !!cl.user || offline;
+    const other = !!(cl.user && st.kb && st.kb.uid && cl.user.uid && st.kb.uid !== cl.user.uid);
+    if (cl.user && cl.user.uid && st.kb && key && !st.kb.uid && !other) Store.update(s => { if (s.kb) s.kb.uid = cl.user.uid; }, 'seen');
+    const head = n ? `<header class="top kb-top"><div class="top-r"><button class="icon-btn" data-a="kb-back" aria-label="Назад">${ic('left')}</button><button class="top-k kb-tt" data-a="kb-top">${esc(n.short)}</button></div></header>`
+      : `<header class="top"><div class="top-r"><button class="icon-btn" data-a="kb-back" aria-label="Назад">${ic('left')}</button><div><div class="top-k">Из Ноушена</div><h1 class="top-t">Заметки</h1></div></div></header>`;
+    if (!signed) return head + kbLock(false, cl.on && (cl.status === 'loading' || cl.status === 'sync'));
+    const bad = KB.err === 'key' && KB.errK === key;
+    if (!key || bad || other) return head + kbLock(true, false, bad, other);
+    kbEnsure();
+    const errText = { none: ['Заметок пока нет', 'На сайте ещё нет файла с заметками.'], old: ['Браузер устарел', 'Обнови браузер на телефоне, и заметки откроются.'], net: ['Нет связи', 'Заметки ещё не скачаны на этот телефон. Откроются, когда появится интернет.'] }[KB.err] || [];
+    if (!KB.data) return head + (KB.err ? `<section class="card kb-lock"><div class="kb-lock-i">${ic('cloud')}</div><div class="h3">${errText[0]}</div><p class="sub">${errText[1]}</p><div class="btns"><button class="btn alt" data-a="kb-retry">Попробовать снова</button></div></section>`
+      : `<section class="card kb-lock"><div class="kb-lock-i spin">${ic('book')}</div><p class="sub">Открываю заметки…</p></section>`);
+    return head + (n ? kbNoteView(n) : kbList());
+  }
+  // переходы внутри заметок: каждый шаг в истории, кнопка назад возвращает на шаг
+  function kbGo(id, hl, k) {
+    if (!KB.data || !KB.data.byId[id]) return;
+    if (!UI.kbNote) UI.kbScroll = window.scrollY;
+    (UI.kbStack = UI.kbStack || []).push(UI.kbNote || null);
+    UI.kbNote = id; UI.kbHl = hl || ''; UI.subDepth = (UI.subDepth || 1) + 1;
+    try { history.pushState({ put: 'kbnote' }, ''); } catch (e) { /* ок */ }
+    render(); window.scrollTo(0, 0); // render уже подсветил совпадения
+    if (UI.kbHl) requestAnimationFrame(() => { const ms = document.querySelectorAll('.kb-body mark'), m = ms[Math.min(ms.length - 1, k || 0)]; if (m) m.scrollIntoView({ block: 'center' }); });
+  }
+  function kbHighlight(scroll) {
+    const q = kbLow((UI.kbHl || '').trim()), body = $('.kb-body'); if (q.length < 2 || !body) return;
+    const qs = kbQs(q), walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT), nodes = []; while (walker.nextNode()) if (!walker.currentNode.parentNode.closest('mark')) nodes.push(walker.currentNode);
+    let first = null;
+    for (const t of nodes) {
+      const low = kbLow(t.nodeValue); let [at, len] = kbFind(low, qs, 0); if (at < 0) continue;
+      const frag = document.createDocumentFragment(); let pos = 0;
+      while (at >= 0) { frag.appendChild(document.createTextNode(t.nodeValue.slice(pos, at))); const m = document.createElement('mark'); m.textContent = t.nodeValue.slice(at, at + len); frag.appendChild(m); if (!first) first = m; pos = at + len; [at, len] = kbFind(low, qs, pos); }
+      frag.appendChild(document.createTextNode(t.nodeValue.slice(pos))); t.parentNode.replaceChild(frag, t);
+    }
+    if (scroll && first) first.scrollIntoView({ block: 'center' });
+  }
+
+  // ---------------------------------------------------------------- цифры: статистика смен и студия 50/50
+  // Один экран с двумя вкладками: графики не мешают калькулятору. На графиках выделен один столбец, остальные приглушены,
+  // значение выбранного видно в строке над графиком (нажми на столбец)
+  const MON1 = ['Я', 'Ф', 'М', 'А', 'М', 'И', 'И', 'А', 'С', 'О', 'Н', 'Д'];
+  // деньги в час без округления до сотни, как в карточке месяца на Сменах; «в час» не отрывается от числа
+  const perHText = v => C.money(Math.round(v)) + ' в час';
+  const barPath = (x, y, w, base) => { const h = base - y, r = Math.min(4, h, w / 2); return h <= 0 ? '' : `M${x} ${base}V${y + r}Q${x} ${y} ${x + r} ${y}H${x + w - r}Q${x + w} ${y} ${x + w} ${y + r}V${base}Z`; };
+  function stBars(items, sel, act, labels) {
+    const W = 320, base = 108, top = 12, band = W / items.length, bw = Math.min(22, band - 8), max = Math.max(...items.map(x => x.v || 0)) || 1;
+    let bg = '', bars = '', lab = '';
+    // зима мягкой полосой за столбцами
+    items.forEach((x, i) => { if (x.winter && !(items[i - 1] && items[i - 1].winter)) { let j = i; while (items[j + 1] && items[j + 1].winter) j++; bg += `<rect class="st-winter" x="${i * band + 1}" y="2" width="${(j - i + 1) * band - 2}" height="${base - 2}" rx="8"/><text class="st-wt" x="${(i + (j - i + 1) / 2) * band}" y="13" text-anchor="middle">зима</text>`; } });
+    items.forEach((x, i) => {
+      const cx = i * band + band / 2, on = i === sel;
+      if (x.v) bars += `<path class="st-bar${on ? ' on' : ''}" d="${barPath(cx - bw / 2, base - (base - top - 6) * x.v / max, bw, base)}"/>`;
+      bars += `<rect class="st-hit" x="${i * band}" y="0" width="${band}" height="${base + 18}" data-a="${act}" data-v="${x.key}"/>`;
+      lab += `<text class="st-lab${on ? ' on' : ''}" x="${cx}" y="${base + 14}" text-anchor="middle">${labels[i]}</text>`;
+    });
+    return `<svg class="st-svg" viewBox="0 0 ${W} ${base + 18}" role="img">${bg}<line class="st-base" x1="0" x2="${W}" y1="${base + 0.5}" y2="${base + 0.5}"/>${bars}${lab}</svg>`;
+  }
+  // зоны цифры приложения за 12 ч: на аренде пороги из Ноушена, на своей машине уровни плана (их считает core.shiftStats)
+  function stZones(S) {
+    const z = S.zones, n = z.n, [hi, lo] = S.zoneAt, mine = z.own && z.other > 0;
+    // первые дни после покупки машины: в окне только аренда, а считаем свою машину, поэтому говорим это прямо
+    if (!n) return mine ? `<section class="card st-c"><div class="over">Цифра за 12 ч, 30 дней</div><p class="sub">На своей машине смен пока нет: зоны появятся с первой сменой.</p></section>` : '';
+    const seg = (k, c) => z[k] ? `<i class="${c}" style="flex:${z[k]}"></i>` : '';
+    // вывод по средней, и только с 10 смен: по одной-двум сменам решать про машину рано
+    const say = z.own ? { g: z.avgR >= 3700 ? SC_HINT.own.good : SC_HINT.own.mid, y: SC_HINT.own.reliable, r: scHintOf(S2st(), 'own', 'bad') }
+      : { g: 'копишь спокойно', y: 'своя машина нужна как можно раньше', r: 'аренда в минусе, нужны своя машина и газ' };
+    const row = (c, icon, t, k) => `<div class="st-zr"><i class="${c}">${ic(icon)}</i><span>${t}</span><b>${z[k]}</b></div>`;
+    return `<section class="card st-c"><div class="between"><div class="over">Цифра за 12 ч, 30 дней</div><span class="st-cap">${n} ${C.plural(n, ['смена', 'смены', 'смен'])}</span></div>
+      <div class="st-stack">${seg('g', 'g')}${seg('y', 'y')}${seg('r', 'r')}</div>
+      <div class="st-zl">${row('g', 'check', 'от ' + C.money(hi), 'g')}${row('y', 'clock', C.grp(lo) + '-' + C.money(hi), 'y')}${row('r', 'down', 'меньше ' + C.money(lo), 'r')}</div>
+      <p class="sub">${n < 10 ? `Вывод будет, когда ${mine ? 'на своей машине' : 'за 30 дней'} наберётся 10 смен.` : `В среднем ${C.money(z.avg)} за 12 ч${mine ? ' на своей машине' : ''}: ${say[z.top]}.`}</p></section>`;
+  }
+  const S2st = () => S();
+  function stMonths(S) {
+    // с первого месяца, где есть смены, но не меньше 6 столбцов: пустой год слева ни к чему
+    const ms = S.months, first = ms.findIndex(x => x.n), list = first < 0 ? [] : ms.slice(Math.min(first, 6));
+    if (!list.length) return '';
+    const withData = list.map((x, i) => x.n ? i : -1).filter(i => i >= 0);
+    const si = UI.stM && list.some(x => x.mk === UI.stM && x.n) ? list.findIndex(x => x.mk === UI.stM) : withData[withData.length - 1], sm = list[si];
+    // полоса зимы только там, где уже были смены: над пустыми месяцами слева она ничего не значит
+    const f0 = list.findIndex(x => x.n), items = list.map((x, i) => ({ key: x.mk, v: x.perH, winter: x.winter && i >= f0 }));
+    // сезон только в процентах: он в ценах ноября 2026 и без разницы аренды и своей машины, а столбцы как в Яндекс Про
+    const ss = S.season, pct = ss ? Math.round(Math.abs(ss.diff) * 100) : 0;
+    const ssn = !ss ? 'Сравню зиму и лето, когда будет хотя бы по 3 смены в каждом сезоне.' : pct < 1 ? 'Зимой выручка за час почти такая же, как летом.'
+      : `Зимой выручка за час на ${pct}% ${ss.diff < 0 ? 'меньше' : 'больше'}, чем летом.`;
+    return `<section class="card st-c"><div class="over">За час в приложении, ${S.kind === 'taxi' ? 'такси' : 'доставка'}</div><div class="st-cap st-cap2">${cap(C.MON[+sm.mk.slice(5) - 1])} ${sm.mk.slice(0, 4)}: <b>${perHText(sm.perH)}</b>${sm.n ? ` · ${sm.n} ${C.plural(sm.n, ['смена', 'смены', 'смен'])}` : ''}</div>
+      ${stBars(items, si, 'st-m', list.map(x => MON1[+x.mk.slice(5) - 1]))}
+      <p class="sub">${ssn}</p></section>`;
+  }
+  function stDays(S) {
+    const ds = S.days; if (!ds.some(x => x.n)) return '';
+    const best = ds.reduce((b, x) => x.n >= 2 && (!b || x.perH > b.perH) ? x : b, null), si = UI.stD != null && ds[UI.stD].n ? UI.stD : best ? best.i : ds.findIndex(x => x.n), sd = ds[si];
+    const capT = UI.stD != null && ds[UI.stD].n ? `${cap(C.DOWL[si])}: <b>${perHText(sd.perH)}</b>` : best ? `Лучше всего платит ${C.DOWL[best.i]}: <b>${perHText(best.perH)}</b>` : `${cap(C.DOWL[si])}: <b>${perHText(sd.perH)}</b>`;
+    return `<section class="card st-c"><div class="over">По дням недели, 90 дней</div><div class="st-cap st-cap2">${capT}</div>
+      ${stBars(ds.map(x => ({ key: x.i, v: x.n ? x.perH : null })), si, 'st-d', C.DOW)}</section>`;
+  }
+  function stDrivers(S) {
+    if (S.kind !== 'taxi') return '';
+    const W = 320, x0 = 14, x1 = 306, lo = 1500, hi = 6000, X = v => x0 + (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo) * (x1 - x0), base = 58;
+    const placed = [];
+    let dots = '';
+    for (const v of S.drivers.slice().sort((a, b) => a - b)) { const x = X(v); let lv = 0; while (placed.some(p => p.lv === lv && Math.abs(p.x - x) < 9.5)) lv++; placed.push({ x, lv }); dots += `<circle class="st-dot" cx="${x.toFixed(1)}" cy="${base - lv * 10}" r="4"/>`; }
+    const me = S.me, mx = me ? X(me.rev) : 0;
+    const meMark = me ? `<line class="st-me-l" x1="${mx}" x2="${mx}" y1="14" y2="${base + 6}"/><circle class="st-me" cx="${mx}" cy="${base}" r="6"/><text class="st-me-t" x="${Math.max(16, Math.min(W - 16, mx))}" y="10" text-anchor="middle">ты</text>` : '';
+    const ticks = [2000, 3000, 4000, 5000].map(v => `<text class="st-lab" x="${X(v)}" y="${base + 24}" text-anchor="middle">${C.grp(v)}</text>`).join('');
+    return `<section class="card st-c"><div class="over">Ты среди водителей</div>
+      <div class="st-cap st-cap2">${me ? `Ты: <b>${C.money(Math.round(me.rev))} выручки в час</b>, ${!me.above ? `ниже всех ${me.total} отчётов` : me.above === me.total ? `выше всех ${me.total} отчётов` : `выше, чем в ${me.above} из ${me.total} отчётов`}` :'Покажу твоё место, когда за 30 дней будет 3 смены такси с суммой.'}</div>
+      <svg class="st-svg" viewBox="0 0 ${W} ${base + 30}" role="img"><line class="st-base" x1="${x0}" x2="${x1}" y1="${base + 8.5}" y2="${base + 8.5}"/>${dots}${meMark}${ticks}</svg>
+      <p class="sub">Выручка пассажиров в час: твоя за 30 дней и отчёты водителей Астаны из исследования, часто за короткие смены в часы пик.</p></section>`;
+  }
+  function stTiles(S) {
+    const t = S.tiles, mon = C.MON[+TODAY.slice(5, 7) - 1], tile = (k, v, s) => `<div class="st-t"><span>${k}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+    return `<section class="card st-c st-grid">${tile('Смен в ' + monthIn(mon), t.shifts, '')}${tile('Часов в ' + monthIn(mon), C.num1(Math.round(t.hours * 10) / 10), '')}
+      ${tile('Средняя смена', t.avgLen ? C.num1(Math.round(t.avgLen * 10) / 10) + ' ч' : '-', 'за 30 дней')}${tile('Лучшая смена', t.best ? C.money(Math.round(t.best.perH)) : '-', t.best ? 'в час, ' + (t.best.d.slice(0, 4) !== TODAY.slice(0, 4) ? t.best.d.split('-').reverse().join('.') : C.dateShort(t.best.d)) : '')}</section>`;
+  }
+  // «в ноябре», «в мае»: как inMonth, но без года
+  const monthIn = mon => ({ 'май': 'мае', 'март': 'марте', 'август': 'августе' })[mon] || mon.replace(/ь$/, 'е').replace(/й$/, 'е');
+  function statsView() {
+    const S = C.shiftStats(S2st(), TODAY), any = Object.keys(S2st().shifts).some(d => d <= TODAY && S2st().shifts[d].h > 0);
+    const empty = `<section class="card st-empty"><div class="kb-lock-i">${ic('chart')}</div><div class="h3">${any ? 'Нужны суммы смен' : 'Пока пусто'}</div><p class="sub">Внеси смены с суммой из Яндекс Про, и здесь появятся графики.</p></section>`;
+    if (!any) return empty;
+    return (S.kind ? stZones(S) + stMonths(S) + stDays(S) + stDrivers(S) : empty) + stTiles(S);
+  }
+  // студия: когда можно купить по прогнозу, своя часть (весь депозит), заём, платёж и переплата; счёт в core.studio.
+  // Цена на ползунке сегодняшняя, к покупке она дорожает: это одна короткая строка под плитками
+  function studioOut(r) {
+    const tile = (k, v, s) => `<div class="st-t"><span>${k}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
+    const and = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' и ' + a[a.length - 1] : a[0] || '';
+    const L = r.loan > 0, half = r.rough || r.beyond, yrs = y => y + '\u00a0' + C.plural(y, ['год', 'года', 'лет']);
+    const tiles = tile(half ? 'Своя половина' : 'Своя часть', mlnShort(r.own), half ? '' : L ? 'весь депозит Отбасы' : 'депозита хватает')
+      + tile('Заём', L ? mlnShort(r.loan) : 'не нужен', L ? `под ${C.num1(r.tier.rate)}% на ${yrs(r.tier.years)}` : '')
+      + tile('Платёж в месяц', L ? C.money(Math.round(r.pay / 100) * 100) : '-', '') + tile('Переплата', L ? mlnShort(r.over) : '-', L ? 'за весь срок' : '');
+    const when = t => `<div class="st-when">${ic('cal')}<span>${t}</span></div>`, note = t => t ? `<p class="sub st-note">${t}</p>` : '';
+    if (r.rough) return tiles + note('Пока считаю пополам и по ОП 16. Укажи в настройках, когда открыт депозит Отбасы, и посчитаю точнее.');
+    if (r.beyond) { const miss = and([r.needTime ? 'трёх лет у депозита' : '', r.needHalf ? 'половины цены на депозите' : '', r.needOp ? 'ОП от 16' : ''].filter(Boolean));
+      return when('Покупка за горизонтом прогноза') + tiles + note(`${miss ? `К концу прогноза ещё не будет ${miss}. ` : ''}Пока считаю пополам и по ОП 16.`); }
+    const up = r.at - r.price >= 50000, ds = L && Math.abs(r.ds - r.at) >= 50000, atT = mlnShort(Math.round(r.at / 1e5) * 1e5);
+    const txt = (up ? `К покупке она подорожает примерно до ${atT} (жильё дорожает около 10% в год).` : '')
+      + (ds ? (up ? ` На столько же нужна договорная сумма, сейчас она ${mlnShort(r.ds)}.` : `Договорная сумма нужна ${atT}, сейчас она ${mlnShort(r.ds)}.`) : '');
+    return when(r.now ? 'Купить можно уже сейчас' : r.from ? 'Купить можно с ' + C.dateLong(r.from) : 'Купить можно ' + inMonth(r.buy)) + tiles + note(txt);
+  }
+  function studioView(m) {
+    const st = m.st, ds = st.set.ds > 0 ? st.set.ds : 2 * st.set.target, price = UI.studio || Math.min(16000000, Math.max(6000000, Math.round(ds / 100000) * 100000));
+    UI.stFc = m.fc;
+    return `<section class="card st-studio"><div class="over">Цена студии сейчас</div><div class="st-price" id="st-p">${mlnShort(price)}</div>
+      <input type="range" class="st-range" id="st-range" min="6000000" max="16000000" step="100000" value="${price}" aria-label="Цена студии сейчас">
+      <div class="st-scale"><span>6 млн</span><span>16 млн</span></div>
+      <div class="st-grid" id="st-out">${studioOut(C.studio(st, TODAY, m.fc, price))}</div></section>`;
+  }
+  function vStats() {
+    const m = model(), tab = UI.statsTab || 'stats';
+    return `<header class="top"><div class="top-r"><button class="icon-btn" data-a="sub-back" aria-label="Назад">${ic('left')}</button><div><div class="top-k">Смены и студия</div><h1 class="top-t">Цифры</h1></div></div></header>
+      <div class="segm st-seg">${[['stats', 'Смены'], ['studio', 'Студия 50/50']].map(([k, n]) => `<button data-a="st-tab" data-v="${k}" aria-pressed="${tab === k}">${n}</button>`).join('')}</div>
+      ${tab === 'studio' ? studioView(m) : statsView()}`;
+  }
+
   // ---------------------------------------------------------------- профиль
   const CATS = ['Смены', 'Часы', 'Серия', 'Недели', 'Месяц', 'Сверх плана', 'Учёт', 'Деньги', 'Машина', 'Рекорды', 'Боссы', 'Задания', 'Особые', 'Голова'];
   // наклейки из легендарных сундуков: одна на крыше, нажал ещё раз, и снял
@@ -1195,6 +1552,8 @@
       <div class="btns">${c.user ? '<button class="btn alt sm" data-a="signout">Выйти</button>' : `<button class="btn sm" data-a="signin">${ic('cloud')}Войти через Google</button>`}</div>
       <button class="row-btn" data-a="export">${ic('dl')}<span>Скачать копию</span></button>
       <label class="row-btn tap">${ic('ul')}<span>Восстановить из файла</span><input type="file" accept="application/json,.json" data-a="import" hidden></label>
+      <button class="row-btn" data-a="stats">${ic('chart')}<span>Цифры: смены и студия</span>${ic('right')}</button>
+      <button class="row-btn" data-a="kb">${ic('book')}<span>Заметки из Ноушена</span>${ic('right')}</button>
       <button class="row-btn" data-a="sub" data-v="settings">${ic('gear')}<span>Настройки и расчёт</span>${ic('right')}</button></section>
     <div class="sec-h"><div class="h3">Как растёт опыт</div></div>
     <section class="card"><p class="sub" style="margin-top:0">Час работы +${XPN().hour} XP, с комбо серии (+${Math.round(XPN().comboStep * 100)}% за каждую смену подряд) до ×1,5. Сумма за день +${XPN().app}. Задания дня: план +${XPN().planDay}, заработок +${XPN().moneyDay}, заказы +${XPN().ordersDay}, все сразу открывают сундук: обычный 50-120, редкий 150-200, легендарный 300 и наклейка на машину. Неделя без недобора +${XPN().week}, босс месяца +${XPN().boss}, жизнь на месяц оплачена +${XPN().paid}, рекорд +${XPN().record}. Отдых при низкой энергии +${XPN().rest}, отметка настроения +${XPN().mood}. Перевод в Отбасы +${XPN().per1000} за 1 000 ₸, плитка квартиры +${XPN().tile}. Вехи от 150 до 1 000, свои задания +${XPN().own}, награды от 50 до 5 000. Всё считается из записей: поправил смену, опыт пересчитался.</p></section>`;
@@ -1319,8 +1678,8 @@
   // Шаги настроек и вкладки снимаем одним прыжком: два back() подряд браузер выполняет позже и путает
   function goTab(to) {
     let back = 0;
-    if (UI.sub && history.state && history.state.put === 'sub') back++;
-    UI.sub = null;
+    if (UI.sub && history.state && (history.state.put === 'sub' || history.state.put === 'kbnote')) back += UI.subDepth || 1;
+    UI.sub = null; UI.kbNote = null; UI.kbStack = []; UI.subDepth = 0;
     try {
       if (to !== 'home' && UI.tab === 'home' && !UI.tabEntry) { history.pushState({ put: 'tab' }, ''); UI.tabEntry = true; }
       else if (to === 'home' && UI.tabEntry) { back++; UI.tabEntry = false; }
@@ -1333,8 +1692,11 @@
   window.addEventListener('popstate', () => {
     if (ignorePop) { ignorePop--; return; }
     if (sheetOpen) closeSheet(true);
-    else if (UI.sub) { UI.sub = null; render(); }
+    else if (UI.sub === 'kb' && UI.kbNote) { UI.kbNote = (UI.kbStack || []).pop() || null; UI.kbHl = ''; UI.subDepth = Math.max(1, (UI.subDepth || 2) - 1); render(); window.scrollTo(0, UI.kbNote ? 0 : UI.kbScroll || 0); }
+    else if (UI.sub) { UI.sub = null; UI.subDepth = 0; render(); }
     else if (UI.tab !== 'home') { UI.tab = 'home'; UI.sel = null; UI.tabEntry = false; try { sessionStorage.setItem('put.tab', 'home'); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); }
+    // старый шаг истории, которому уже нечего закрыть (после перезагрузки): проходим его, чтобы назад не нажимался вхолостую
+    else if (history.state && history.state.put) { try { history.back(); } catch (e) { /* ок */ } }
   });
   function logSheet(d, preH) {
     const st = S(), x = Object.assign({}, st.shifts[d] || {}, preH != null ? { h: preH } : {}), plan = C.planHours(st, d);
@@ -1828,7 +2190,34 @@
         after(before, [['Газ стоит. Топливо дешевле, прогноз пересчитан.', 'good']]); break;
       }
       case 'fx-next': nextFx(); break;
-      case 'sub': UI.sub = el.dataset.v; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      case 'sub': UI.sub = el.dataset.v; UI.subDepth = 1; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      case 'kb': if (KB.err === 'net') { KB.err = null; KB.errK = null; } UI.sub = 'kb'; UI.kbNote = null; UI.kbStack = []; UI.kbHl = ''; UI.subDepth = 1; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      case 'kb-back': if (history.state && (history.state.put === 'sub' || history.state.put === 'kbnote')) history.back(); else { UI.sub = null; UI.kbNote = null; UI.subDepth = 0; render(); } break;
+      case 'kb-note': kbGo(el.dataset.id, el.dataset.hl ? KB.q : '', +el.dataset.k || 0); break;
+      case 'kb-top': window.scrollTo({ top: 0, behavior: reduced() ? 'auto' : 'smooth' }); break;
+      case 'kb-to': { const h = document.getElementById(el.dataset.v); if (h) h.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); break; }
+      case 'kb-dbt': { const id = el.dataset.id; KB.open[id] = !KB.open[id]; if (!KB.open[id]) { delete KB.dbq[id]; delete KB.shown[id]; } render(); break; }
+      case 'kb-dbgo': {
+        const id = el.dataset.id, db = KB.data && KB.data.dbs[id]; if (!db) break;
+        KB.open[id] = true; KB.shown[id] = 20; if (el.dataset.q) KB.dbq[id] = KB.q.trim();
+        if (UI.kbNote !== db.note) kbGo(db.note, ''); else render();
+        requestAnimationFrame(() => { const x = document.getElementById('db-' + id); if (x) x.scrollIntoView({ block: 'start' }); });
+        break;
+      }
+      case 'kb-row': {
+        const nx = el.nextElementSibling;
+        const key = el.dataset.db + ':' + el.dataset.i; // раскрытые строки помнятся: перерисовка их не закрывает
+        if (nx && nx.classList.contains('kb-det')) { nx.remove(); el.setAttribute('aria-expanded', 'false'); KB.det.delete(key); }
+        else { el.insertAdjacentHTML('afterend', kbRowDet(el.dataset.db, +el.dataset.i)); el.setAttribute('aria-expanded', 'true'); KB.det.add(key); }
+        break;
+      }
+      case 'kb-more': { const id = el.dataset.id; KB.shown[id] = (KB.shown[id] || 20) + 20; const box = $('#rows-' + id); if (box) box.innerHTML = kbRows(id); break; }
+      case 'kb-unlock': kbUnlock(); break;
+      case 'stats': UI.sub = 'stats'; UI.subDepth = 1; UI.stM = null; UI.stD = null; UI.statsTab = 'stats'; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      case 'st-tab': UI.statsTab = el.dataset.v; render(); break;
+      case 'st-m': UI.stM = el.dataset.v; render(); break;
+      case 'st-d': UI.stD = +el.dataset.v; render(); break;
+      case 'kb-retry': KB.err = null; KB.errK = null; render(); break;
       case 'sub-back': if (history.state && history.state.put === 'sub') history.back(); else { UI.sub = null; render(); } break;
       case 'fuel': Store.update(s => { s.set.fuel = el.dataset.v; }, 'set'); break;
       case 'rebase': Store.update(s => { s.base = C.makeBase(s, TODAY); }, 'rebase'); toast('План пересчитан от сегодня'); break;
@@ -1934,9 +2323,10 @@
     const mini = onb ? '' : miniBar(st);
     document.body.classList.toggle('has-mini', !!mini); // тосты и низ экрана поднимаются над мини-полоской
     $('#tabbar').innerHTML = onb ? '' : mini + `<div class="tabs">${TABS.map(([k, n, i]) => `<button class="tb${UI.tab === k ? ' on' : ''}" data-a="tab" data-tab="${k}" aria-current="${UI.tab === k ? 'page' : 'false'}"><span class="ti">${ic(i)}</span>${n}</button>`).join('')}</div>`;
-    const view = onb ? vOnboard : { home: vHome, shifts: vShifts, money: vMoney, path: vPath, me: vMe }[UI.tab] || vHome;
+    const view = onb ? vOnboard : UI.sub === 'kb' ? vKb : UI.sub === 'stats' ? vStats : { home: vHome, shifts: vShifts, money: vMoney, path: vPath, me: vMe }[UI.tab] || vHome;
     $('#view').innerHTML = view();
     $('#view').className = onb ? '' : 'view';
+    if (UI.sub === 'kb' && UI.kbNote && UI.kbHl) kbHighlight(false);
   }
 
   document.body.insertAdjacentHTML('afterbegin', D.sprite());
@@ -1974,6 +2364,7 @@
       if (r.why) { r.bad.forEach(showField); toast(r.why, 'warn'); } else if (r.n) toast('Сохранено');
     }
   });
+  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.id === 'kb-code') { e.preventDefault(); kbUnlock(); } else if (e.key === 'Enter' && e.target && (e.target.id === 'kb-q' || e.target.dataset.dbq)) e.target.blur(); });
   document.addEventListener('focusin', e => { const el = e.target; if (el.tagName === 'INPUT' && el.inputMode === 'numeric' && el.value) el.select(); });
   document.addEventListener('input', e => {
     const el = e.target;
@@ -1989,11 +2380,18 @@
       const sb = document.querySelector('[data-a="save-day"]'); if (sb) sb.disabled = UI.dh == null;
     }
     if (/^f-c[a-z]+$/.test(el.id || '') && el.id !== 'f-cc') carCalc();
+    // заметки: поиск обновляет только список, поле не теряет фокус
+    if (el.id === 'kb-q') { KB.q = el.value; const res = $('#kb-res'), home = $('#kb-home'); if (res) res.innerHTML = KB.q.trim() ? kbResults(KB.q) : ''; if (home) home.hidden = !!KB.q.trim(); }
+    if (el.dataset && el.dataset.dbq) { const id = el.dataset.dbq; KB.dbq[id] = el.value; KB.shown[id] = 20; const box = $('#rows-' + id); if (box) box.innerHTML = kbRows(id); }
+    if (el.id === 'st-range') { UI.studio = +el.value; const p = $('#st-p'), out = $('#st-out'); if (p) p.textContent = mlnShort(UI.studio); if (out) out.innerHTML = studioOut(C.studio(S(), TODAY, UI.stFc, UI.studio)); }
+    if (el.id === 'kb-code') { el.value = kbCode(el.value).replace(/(.{4})(?=.)/g, '$1-'); }
     if (el.id === 'f-pa') payoffCalc();
   });
 
   Store.onChange(why => {
     if (why === 'field' || why === 'seen') return;
+    // открытая заметка не перерисовывается от статуса облака, только если поменялись вход или код
+    if (why === 'cloud' && UI.sub === 'kb' && KB.data) { const st0 = S(), sig = !!(Store.cloud && Store.cloud.user) + '|' + (st0 && st0.kb ? st0.kb.k : ''); if (sig === UI.kbSig) return; UI.kbSig = sig; }
     const a = document.activeElement;
     if (why === 'cloud' && a && a.tagName === 'INPUT') return; // не сбивать ввод из-за статуса облака
     render();

@@ -116,6 +116,8 @@ const Core = (() => {
     if (!Array.isArray(out.quests)) out.quests = [];
     out.money = out.money.filter(m => m && m.d).sort(byDate);
     if (!out.car || typeof out.car !== 'object' || !out.car.on || !(out.car.price > 0)) out.car = null;
+    // ключ к заметкам из Ноушена (base64url, 32 байта)
+    if (!out.kb || typeof out.kb !== 'object' || typeof out.kb.k !== 'string' || !/^[\w-]{43}$/.test(out.kb.k)) out.kb = null;
     applyCar(out);
     out.v = 1;
     return out;
@@ -594,7 +596,7 @@ const Core = (() => {
       for (const p of line) { if (p.d < from) continue; if (p.d > to) break; s += Math.max(0, v) * isoDiff(d, p.d); d = p.d; v = p.otb || 0; }
       return s + Math.max(0, v) * (isoDiff(d, to) + 1);
     };
-    const bal0 = histBal(iso), l1 = addYears(open, 3), lastMk = rows.length ? rows[rows.length - 1].mk : nowMk, opAt = {};
+    const bal0 = histBal(iso), l1 = addYears(open, 3), lastMk = rows.length ? rows[rows.length - 1].mk : nowMk, opAt = {}, balAt = {};
     let op = 0, opNow = 0, l2 = null, l3 = null, interim = null, prev = null;
     for (let i = 0, mk = mkOf(open); i < 600 && mk <= lastMk; i++, mk = mkAdd(mk, 1)) {
       const D = dim(mk), end = mk + '-' + pad(D), first = mk === mkOf(open) ? open : mk + '-01';
@@ -613,7 +615,7 @@ const Core = (() => {
         op += Math.max(0, (p0 + cur) / 2) * k * (mk === mkOf(open) ? (D - +open.slice(8) + 1) / D : 1);
         bal = cur; prev = cur;
       }
-      opAt[mk] = op;
+      opAt[mk] = op; balAt[mk] = bal;
       // даты замков по последнему пересечению: если банк или сверка показали меньше, дата сдвигается
       if (bal < half - 0.5) l2 = null;
       else if (!l2) l2 = mk <= nowMk ? (line.find(p => mkOf(p.d) === mk && p.otb >= half - 0.5) || { d: first }).d : end;
@@ -627,7 +629,7 @@ const Core = (() => {
     const emptyMonths = bal0 <= 0 && since && since <= iso ? Math.floor(isoDiff(since, iso) / 30.44) : 0;
     return { ds, open, half, opNow, bal: bal0, anchored: an ? an.d : null,
       locks: [{ k: 'time', date: l1, ok: iso >= l1 }, { k: 'half', date: l2, ok: bal0 >= half - 0.5, now: bal0 }, { k: 'op', date: l3, ok: opNow >= 16, now: opNow }],
-      buy, interim, tier: tierOf(opBuy != null ? opBuy : opNow), opBuy, tiers: OP_TIERS, emptyMonths };
+      buy, interim, tier: tierOf(opBuy != null ? opBuy : opNow), opBuy, tiers: OP_TIERS, emptyMonths, opAt, balAt };
   }
   // ---------------------------------------------------------------- смены: день, неделя, месяц
   // сколько остаётся с часа сверх плана: выручка после комиссий и налога минус топливо
@@ -679,13 +681,94 @@ const Core = (() => {
   // уровень по выручке в час: с каким сценарием совпадает
   function scenarioOf(R) {
     if (!R) return null;
-    if (R < 2900) return { key: 'bad', name: 'плохой', hint: 'на аренде в минус: своя машина, газ и 7/0' };
+    if (R < 2900) return { key: 'bad', name: 'плохой', hint: 'на аренде в минус: нужны своя машина и газ' };
     if (R < 3200) return { key: 'reliable', name: 'надёжный', hint: 'на аренде почти ничего не остаётся: своя машина как можно раньше' };
     if (R < 3700) return { key: 'mid', name: 'средний', hint: 'всё идёт по плану' };
     return { key: 'good', name: 'хороший', hint: 'можно копить и на аренде' };
   }
   // цифра приложения за 12 часов по выручке в час и фазе
   const appPer12 = (st, iso, R) => { const g = st.set, ph = phaseAt(st, iso); return ph === 'pre' ? null : R * growth(g, mkOf(iso))[1] * 12 * keepOf(g, ph); };
+
+  // ---------------------------------------------------------------- цифры смен (экран «Цифры»)
+  // выручка пассажиров в час по отчётам и оценкам водителей Астаны из исследования 15.11.2026: Эконом и смены, где был Эконом.
+  // По наиболее вероятной трактовке калибровки 15.11: у блогеров сумма без пометки это выплата приложения (делим на 0,764),
+  // слово грязными это валовая (N6). Реклама Яндекса и парков, Алматы, города и тарифы без названия, чистый Комфорт+ не взяты;
+  // R05 по метрике приложения того же дня (R13: 19 ч, а не 13)
+  const DRIVERS = [2360, 2857, 3333, 3549, 3613, 3665, 3714, 3927, 4944, 5726];
+  // цифра дня в Яндекс Про за 12 ч на аренде (уже без комиссий и 4%), цены ноября 2026:
+  // от 30 000 копишь спокойно, 26 600-30 000 своя машина как можно раньше, ниже аренда в минусе
+  const DAY_ZONES = [30000, 26600];
+  // на своей машине аренды нет и пороги аренды теряют смысл: там зоны по уровням плана, как в scenarioOf
+  // (выручка пассажиров 3 200 и 2 900 в час), переведённые в цифру приложения за 12 ч
+  const OWN_ZONES = [3200, 2900];
+  const WINTER = [12, 1, 2], SUMMER = [6, 7, 8];
+  function shiftStats(st, iso) {
+    const g = st.set, all = [], sum = (a, f) => a.reduce((t, x) => t + f(x), 0);
+    for (const [d, x] of Object.entries(st.shifts || {})) {
+      if (d > iso || !x || !(x.h > 0)) continue;
+      const ph = phaseAt(st, d), h = +x.h, app = x.app > 0 ? +x.app : 0, fr = growth(g, mkOf(d))[1], taxi = ph !== 'pre';
+      // выручка пассажиров в час в ценах ноября 2026: так месяцы, сезоны, аренда и своя машина сравниваются честно
+      all.push({ d, h, app, taxi, ph, fr, rev: app && taxi ? app / h / keepOf(g, ph) / fr : null });
+    }
+    all.sort((a, b) => a.d < b.d ? -1 : a.d > b.d ? 1 : 0);
+    const kind = all.some(x => x.taxi && x.app) ? 'taxi' : all.some(x => x.app) ? 'pre' : null;
+    const paid = all.filter(x => x.app && (kind === 'taxi') === x.taxi), d30 = isoAdd(iso, -29), d90 = isoAdd(iso, -89), mk = mkOf(iso);
+    const perH = list => { const h = sum(list, x => x.h); return h ? sum(list, x => x.app) / h : null; };
+    // зоны за 30 дней: только смены на той машине, что сейчас, по цифре приложения за 12 ч в ценах этого месяца.
+    // Пороги округлены до сотни, как на экране, и смена сравнивается с ними же, чтобы счёт не спорил с подписью
+    const phT = phaseAt(st, iso), own = phT === 'own', G = growth(g, mk)[1], kT = keepOf(g, phT === 'pre' ? 'rent' : phT);
+    const zoneAt = (own ? OWN_ZONES.map(r => r * 12 * kT) : DAY_ZONES).map(v => Math.round(v * G / 100) * 100);
+    const at12 = rev => Math.round(rev * 12 * kT * G), zoneOf = v => v >= zoneAt[0] ? 'g' : v >= zoneAt[1] ? 'y' : 'r';
+    const zl = kind === 'taxi' && phT !== 'pre' ? paid.filter(x => x.d >= d30 && (x.ph === 'own') === own) : [], zh = sum(zl, x => x.h);
+    // other: смены в окне на другой машине (первые недели после покупки), чтобы экран сказал, что считает только свою
+    const other = kind === 'taxi' ? paid.filter(x => x.d >= d30 && (x.ph === 'own') !== own).length : 0;
+    const zones = { g: 0, y: 0, r: 0, n: zl.length, own, other, at: mk, avg: null, avgR: null, top: null };
+    for (const x of zl) zones[zoneOf(at12(x.rev))]++;
+    // вывод по средней цифре за 12 ч (взвешенной по часам), как в исследовании, а не по самой частой зоне
+    if (zh) { zones.avgR = sum(zl, x => x.rev * x.h) / zh; zones.avg = at12(zones.avgR); zones.top = zoneOf(zones.avg); }
+    // по месяцам за год: в приложении за час, как показывает Яндекс Про
+    const months = [];
+    for (let i = 11; i >= 0; i--) { const m = mkAdd(mk, -i), list = paid.filter(x => x.d.slice(0, 7) === m); months.push({ mk: m, perH: perH(list), n: list.length, winter: WINTER.indexOf(+m.slice(5)) >= 0 }); }
+    const days = [0, 1, 2, 3, 4, 5, 6].map(i => { const list = paid.filter(x => x.d >= d90 && dow(x.d) === i); return { i, perH: perH(list), n: list.length }; });
+    // зима против лета в ценах ноября 2026, от 3 смен в каждом сезоне: в такси по выручке пассажиров в час,
+    // чтобы переход с аренды на свою машину не выдавал себя за сезон; в доставке по деньгам в час
+    const seas = mon => { const list = paid.filter(x => mon.indexOf(+x.d.slice(5, 7)) >= 0), h = sum(list, x => x.h); return { n: list.length, v: h ? sum(list, x => kind === 'taxi' ? x.rev * x.h : x.app / x.fr) / h : null }; };
+    const w = seas(WINTER), su = seas(SUMMER), season = w.n >= 3 && su.n >= 3 ? { diff: w.v / su.v - 1, nw: w.n, ns: su.n } : null;
+    // твоё место среди водителей: выручка пассажиров в час за 30 дней, от 3 смен такси; отчёты переводим в цены этого месяца
+    const r30 = paid.filter(x => x.taxi && x.d >= d30), rh = sum(r30, x => x.h), rev = rh ? sum(r30, x => x.app / keepOf(g, x.ph)) / rh : null, drivers = DRIVERS.map(v => v * G);
+    const me = kind === 'taxi' && r30.length >= 3 ? { rev, above: drivers.filter(v => v < rev).length, total: drivers.length, n: r30.length } : null;
+    // лучшая смена по деньгам в час из Яндекс Про, а не по сумме, чтобы не хвалить переработку; от 6 ч, чтобы не выиграл короткий час пик
+    const val = x => x.app / x.h, best = paid.filter(x => x.h >= 6).reduce((b, x) => !b || val(x) > val(b) ? x : b, null);
+    const mon = all.filter(x => x.d.slice(0, 7) === mk), last = all.filter(x => x.d >= d30);
+    return { kind, zones, months, days, season, me, drivers, zoneAt,
+      tiles: { shifts: mon.length, hours: sum(mon, x => x.h), avgLen: last.length ? sum(last, x => x.h) / last.length : null, best: best ? { d: best.d, h: best.h, perH: best.app / best.h } : null } };
+  }
+  // студия по Отбасы 50/50, как в модели исследования (model_tb.first_deal и afford.py, без наличных и машины).
+  // Цена на ползунке сегодняшняя и до месяца покупки растёт на 10% в год (g_flat). Договорная сумма равна цене в месяц покупки,
+  // в оплату идёт весь депозит S, заём = цена - S. ОП x ДС / 1000 от ДС не зависит, значит ОП(цена) = ОП x ДС / цена.
+  // Покупка в первый месяц прогноза, когда депозиту 3 года и либо депозита хватает без займа (как noloan_needs_op = False),
+  // либо на нём половина цены и ОП(цена) от 16
+  const FLAT_G = 10;
+  function studio(st, iso, fc, price, gFlat) {
+    const L = otbLocks(st, iso, fc), t0 = OP_TIERS[0], now = mkOf(iso), gf = gFlat != null ? gFlat : FLAT_G;
+    const at = mk => price * Math.pow(1 + gf / 100, mkDiff(now, mk) / 12);
+    const deal = (P, loan, tier) => { const n = tier ? tier.years * 12 : 0, pay = loan > 0 ? annuity(loan, tier.rate / 100 / 12, n) : 0; return { at: P, own: P - loan, loan, tier, pay, over: loan > 0 ? pay * n - loan : 0 }; };
+    const rough = () => deal(price, price / 2, { op: t0[0], rate: t0[1], years: t0[2] });
+    // депозит ещё не указан: грубо, пополам и по самому низкому ОП, в сегодняшних ценах
+    if (!L) return Object.assign({ price, rough: true }, rough());
+    const t1 = mkOf(L.locks[0].date), months = Object.keys(L.opAt).sort();
+    // в текущем месяце opAt и остаток уже на конец месяца: «уже сейчас» только если замки открыты сегодня
+    const today = P => { const S0 = Math.max(0, L.bal), okT = iso >= L.locks[0].date, okD = S0 >= P || (S0 >= P / 2 - 0.5 && L.opNow * L.ds / P >= 16); return { now: okT && okD, from: !okT && okD ? L.locks[0].date : null }; };
+    for (const mk of months) {
+      if (mk < t1 || mk < now) continue;
+      const P = at(mk), S = Math.max(0, L.balAt[mk]), op = L.opAt[mk] * L.ds / P, base = Object.assign({ price, buy: mk, dep: S, ds: L.ds }, mk === now ? today(P) : {});
+      if (S >= P) return Object.assign(base, deal(P, 0, null));
+      if (S >= P / 2 - 0.5 && op >= 16) return Object.assign(base, { op }, deal(P, P - S, tierOf(op)));
+    }
+    // за горизонтом прогноза: чего не хватает в последнем месяце; плитки грубо, пополам и по ОП 16
+    const lm = months[months.length - 1], P = lm ? at(lm) : price, S = lm ? Math.max(0, L.balAt[lm]) : Math.max(0, L.bal), op = lm ? L.opAt[lm] * L.ds / P : 0;
+    return Object.assign({ price, beyond: true, dep: S, ds: L.ds, needTime: !lm || lm < t1, needHalf: S < P / 2 - 0.5, needOp: S < P && op < 16 }, rough());
+  }
 
   // ---------------------------------------------------------------- путь: вехи и этапы
   function milestones(st, iso, fc) {
@@ -807,7 +890,7 @@ const Core = (() => {
     ENV, ENV_TITLE, envSum, lifeOf, monthNeed, CARS, fuelMonth,
     phaseAt, shiftAfter, hasOv, moneyKey, forget, rentVsOwn, crossDate, valueAt, naOf, isAdd, byDate, lastMoney, entries, addsSince, moneyLine, futureEvents, otbState, runway, measuredR, usedR, dayMoney, dayFixed, estimate, startState,
     forecast, makeBase, versusPlan, daysFor, needExtra, hourValue, shiftCost, shiftDay, rangeStats, weekStats, monthStats, streak, scenarioOf, appPer12,
-    milestones, otbYear, phaseNow, PHASES, dayMessage,
+    milestones, otbYear, phaseNow, PHASES, dayMessage, shiftStats, studio, DRIVERS, DAY_ZONES,
   };
 })();
 if (typeof module !== 'undefined') module.exports = Core;
