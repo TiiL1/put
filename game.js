@@ -27,8 +27,10 @@ const Game = (() => {
     own: 50,           // своё задание
     reload: 300,       // лёгкая неделя прошла как задумал: не меньше, чем дали бы лишние часы
   };
-  const QUEST_XP = { 'otb-open': 300, 'otb-2026': 300, license: 800, kaspi: 200, taxi: 500, check4w: 400, car: 1000, gas: 300, selfemp: 200, reg: 150 };
-  const QUEST_TITLE = { 'otb-open': 'Открыть депозит Отбасы', 'otb-2026': 'Отбасы ради премии за 2026 год', license: 'Права', kaspi: 'Заявка на автокредит', taxi: 'Первая смена в такси', check4w: '4 недели смен', car: 'Своя машина', gas: 'Газ', selfemp: 'Самозанятость и доставка', reg: 'Временная регистрация' };
+  // вехи с опытом. Газа нет (с 19.11.2026): Яндекс Про в Астане требует машину без ГБО, газ не веха и не опыт.
+  // Старая отметка done.gas безвредна: веха без опыта в опыт и в задания не попадает
+  const QUEST_XP = { 'otb-open': 300, 'otb-2026': 300, license: 800, kaspi: 200, taxi: 500, check4w: 400, car: 1000, selfemp: 200, reg: 150 };
+  const QUEST_TITLE = { 'otb-open': 'Открыть депозит Отбасы', 'otb-2026': 'Отбасы ради премии за 2026 год', license: 'Права', kaspi: 'Заявка на автокредит', taxi: 'Первая смена в такси', check4w: '4 недели смен', car: 'Своя машина', selfemp: 'Самозанятость и доставка', reg: 'Временная регистрация' };
   const questXp = id => QUEST_XP[id] || (/^otb-y\d{4}$/.test(id) ? 500 : 0);
   const questTitle = id => QUEST_TITLE[id] || (/^otb-y\d{4}$/.test(id) ? 'Отбасы: взносы за ' + id.slice(5) + ' год' : 'Веха');
   const comboOf = (n, step) => Math.min(XP.comboMax, 1 + (step || XP.comboStep) * Math.max(0, n - 1));
@@ -409,11 +411,11 @@ const Game = (() => {
   }
   // характеристики персонажа из записей за 4 недели: уровень 1-10, значение и совет
   function attrs(st, iso, c) {
-    const g = st.set, lv = x => Math.max(1, Math.min(10, Math.round(x)));
-    let h = 0, plan = 0, done = 0, eSum = 0, eN = 0;
+    const g = st.set, lv = x => Math.max(1, Math.min(10, Math.round(x))), cap = g.maxWeek > 0 ? g.maxWeek : 72;
+    let h = 0, pH = 0, plan = 0, done = 0, eSum = 0, eN = 0;
     for (let d = C.isoAdd(iso, -27); d <= iso; d = C.isoAdd(d, 1)) {
       const p = C.planHours(st, d), x = st.shifts[d], w = x && x.h > 0 ? +x.h : 0;
-      h += w;
+      h += w; pH += p;
       if (p > 0 && d < iso) { plan++; if (w >= p) done++; }
       if (c.energyOn[d] != null) { eSum += c.energyOn[d]; eN++; }
     }
@@ -431,13 +433,16 @@ const Game = (() => {
     const closed = (c.months || []).filter(x => !x.partial && x.earned > 0).pop(), m = c.month && c.month.paidOn ? c.month : closed;
     const thrift = m && m.earned > 0 ? (m.earned - m.need) / m.earned : null;
     const out = [
-      { key: 'stam', title: 'Выносливость', icon: 'clock', lvl: lv(h / 4 / 8), val: C.num1(Math.round(h / 4)) + ' ч в неделю', tip: 'Часы в неделю за последние 4 недели. 70-80 ч = максимум.' },
+      // максимум на потолке часов из настроек (maxWeek): игра не зовёт работать больше него
+      { key: 'stam', title: 'Выносливость', icon: 'clock', lvl: lv(h / 4 / (cap / 10)), val: C.num1(Math.round(h / 4)) + ' ч в неделю', tip: `Часы в неделю за последние 4 недели. Максимум ${cap} ч, это твой потолок.` },
       { key: 'disc', title: 'Дисциплина', icon: 'check', lvl: plan ? lv(done / plan * 10) : 1, val: plan ? done + ' из ' + plan + ' ' + C.plural(plan, ['смены', 'смен', 'смен']) + ' по плану' : 'нет смен', tip: 'Сколько плановых смен закрыто полностью за 4 недели.' },
       { key: 'grip', title: 'Хватка', icon: 'target', lvl: ratio == null ? 1 : lv(1 + (ratio - 0.7) / 0.6 * 9), val: ratio == null ? 'внеси суммы 3 смен' : C.money(Math.round(recent.reduce((s, d) => s + st.shifts[d].app / st.shifts[d].h, 0) / recent.length)) + ' в час', tip: 'Заработок в час против плана. Растёт от часов пик, хороших районов и Экспресса в спад.' },
       { key: 'thrift', title: 'Бережливость', icon: 'piggy', lvl: thrift == null ? 1 : lv(1 + (thrift + 0.5) * 9), val: thrift == null ? 'ещё нет закрытого месяца' : (thrift >= 0 ? C.money(Math.round(m.earned - m.need)) + ' сверх жизни за ' + C.MON[+m.mk.slice(5) - 1] : 'за ' + C.MON[+m.mk.slice(5) - 1] + ' жизнь покрыта на ' + C.money(Math.round(m.earned))), tip: 'Сколько заработка остаётся сверх конвертов за последний закрытый месяц.' },
       { key: 'rec', title: 'Восстановление', icon: 'battery', lvl: eN ? lv(eSum / eN / 10) : 10, val: eN ? 'энергия ' + Math.round(eSum / eN) + ' в среднем' : 'энергия полная', tip: 'Средняя энергия за 4 недели. Сон и выходные держат её.' },
     ];
-    const weak = out.slice().sort((a, b) => a.lvl - b.lvl)[0];
+    // Качай: самая слабая. Выносливость не советуем, если часы плана и так закрыты: больше плана работать не надо.
+    // За 4 недели ни плана, ни смен (до первой подработки): советовать нечего
+    const weak = pH > 0 || h > 0 ? out.filter(a => a.key !== 'stam' || h < pH).sort((a, b) => a.lvl - b.lvl)[0] : null;
     return { list: out, weak };
   }
 

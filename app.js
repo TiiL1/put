@@ -14,8 +14,12 @@
   const days = n => n + ' ' + C.plural(n, ['день', 'дня', 'дней']);
   const hrs = n => C.num1(n) + ' ' + (Number.isInteger(Math.round(n * 10) / 10) ? C.plural(n, ['час', 'часа', 'часов']) : 'часа');
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+  // числа, единицы и диапазоны в тексте не рвутся на строки: 150 000 ₸, 12 ч, 07-10
+  const nb = s => String(s).replace(/(\d) (?=\d{3}(?!\d))/g, '$1\u00a0').replace(/(\d) (₸|%|ч(?![а-яё])|км|л(?![а-яё]))/g, '$1\u00a0$2').replace(/(\d)-(\d)/g, '$1\u2011$2');
   const moneyHtml = n => C.money(n).replace(/\s₸$/, '') + '<span class="cur"> ₸</span>';
   const mlnShort = n => (Math.round(n / 1e4) / 100).toString().replace('.', ',') + ' млн ₸';
+  // до десятой: для прикидок, где сотые были бы ложной точностью
+  const mln1 = n => (Math.round(n / 1e5) / 10).toString().replace('.', ',') + ' млн ₸';
   const xpChip = (x, done) => `<span class="xpc${done ? ' done' : ''}">${ic('star')}+${C.grp(x)} XP</span>`;
   const DOW_IN = ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье'];
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -174,12 +178,13 @@
     const xp = pl.ledger.filter(e => e.d >= r.from && e.d <= end).reduce((x, e) => x + e.xp, 0);
     const badges = pl.badges.filter(b => b.on && b.on >= r.from && b.on <= end).map(b => b.title);
     const title = r.kind === 'month' ? 'Итоги месяца' : 'Итоги недели';
-    const range = r.kind === 'month' ? cap(C.monthName(C.mkOf(r.from))) : `${+r.from.slice(8)}${r.from.slice(5, 7) !== r.to.slice(5, 7) ? ' ' + C.dateShort(r.from).split(' ')[1] : ''}–${C.dateShort(r.to)}`;
-    // против себя в прошлом периоде: выручка за час и часы
-    const vs = [];
-    if (r.a.perH && r.b.perH) { const p = Math.round((r.a.perH / r.b.perH - 1) * 100); vs.push(p === 0 ? 'за час столько же' : `за час ${p > 0 ? '+' : '−'}${Math.abs(p)}%`); }
-    if (r.b.sh) { const dh = Math.round(r.a.h - r.b.h); vs.push(dh === 0 ? 'часов столько же' : `часов ${dh > 0 ? '+' : '−'}${Math.abs(dh)}`); }
-    return Object.assign(r, { na0, na1, delta: na0 != null ? na1 - na0 : null, xp, badges, title, range, vs, pct0: na0 != null ? na0 / m.target : null, pct1: na1 / m.target, level: pl.level, rank: pl.rank.title });
+    const range = r.kind === 'month' ? cap(C.monthName(C.mkOf(r.from))) : `${+r.from.slice(8)}${r.from.slice(5, 7) !== r.to.slice(5, 7) ? ' ' + C.dateShort(r.from).split(' ')[1] : ''}-${C.dateShort(r.to)}`;
+    // против себя в прошлом периоде: выручка за час и часы. Только если оба периода целиком одна работа (подработка или такси):
+    // этапы идут по порядку, так что хватает первого дня прошлого периода и последнего дня этого
+    const vs = [], kd = d => C.phaseAt(st, d) === 'pre' ? 'pre' : 'taxi', same = kd(r.pFrom) === kd(end);
+    if (same && r.a.perH && r.b.perH) { const p = Math.round((r.a.perH / r.b.perH - 1) * 100); vs.push(p === 0 ? 'за час столько же' : `за час ${p > 0 ? '+' : '−'}${Math.abs(p)}%`); }
+    if (same && r.b.sh) { const dh = Math.round(r.a.h - r.b.h); vs.push(dh === 0 ? 'часов столько же' : `часов ${dh > 0 ? '+' : '−'}${Math.abs(dh)}`); }
+    return Object.assign(r, { na0, na1, delta: na0 != null ? na1 - na0 : null, xp, badges, title, range, vs, pct0: na0 != null ? Math.max(0, na0 / m.target) : null, pct1: Math.max(0, na1 / m.target), level: pl.level, rank: pl.rank.title });
   }
   function recapCard(m) {
     const R = recapData(m); if (!R) return '';
@@ -188,7 +193,7 @@
       ${R.delta != null ? `<div class="recap-big"><b class="${R.delta >= 0 ? 'up' : 'down'}">${C.money(r1k(R.delta), true)}</b><span>к активам за ${R.kind === 'month' ? 'месяц' : 'неделю'}</span></div>
         <div class="pbar"><i style="width:${Math.max(0, Math.min(100, R.pct1 * 100)).toFixed(1)}%"></i></div><div class="sub">${Math.floor(R.pct1 * 100)}% пути${R.pct0 != null && Math.floor(R.pct0 * 100) !== Math.floor(R.pct1 * 100) ? `, было ${Math.floor(R.pct0 * 100)}%` : ''}</div>` : ''}
       <div class="kv"><div><span>Часов</span><b>${C.num1(a.h)}${a.plan > 0 ? `<small> из ${C.num1(a.plan)}</small>` : ''}</b></div><div><span>Смен</span><b>${a.sh}</b></div>
-        <div><span>В приложении</span><b>${C.money(a.app)}</b></div><div><span>За час</span><b>${a.perH ? C.money(Math.round(a.perH)) : '–'}</b></div></div>
+        <div><span>В приложении</span><b>${C.money(a.app)}</b></div><div><span>За час</span><b>${a.perH ? C.money(Math.round(a.perH)) : '-'}</b></div></div>
       <ul class="recap-list">
         ${a.best ? `<li>Лучший день: ${C.DOWL[C.dow(a.best.d)]}, ${C.money(a.best.app)}</li>` : ''}
         ${R.vs.length ? `<li>Против ${prevName}: ${R.vs.join(', ')}</li>` : ''}
@@ -217,7 +222,7 @@
     const pw = Math.max(34, (W - 180) * Math.max(0, Math.min(1, R.pct1))); const pg = x.createLinearGradient(90, 0, 90 + pw, 0); pg.addColorStop(0, '#6E5DF2'); pg.addColorStop(1, '#A193FF');
     rr(90, 590, pw, 34, 17); x.fillStyle = pg; x.fill();
     txt(Math.floor(R.pct1 * 100) + '% пути к своей квартире', 90, 680, '#D9DDEA', 700, 40);
-    const cells = [['Часов', C.num1(R.a.h)], ['Смен', String(R.a.sh)], ['В приложении', C.money(R.a.app)], ['За час', R.a.perH ? C.money(Math.round(R.a.perH)) : '–']];
+    const cells = [['Часов', C.num1(R.a.h)], ['Смен', String(R.a.sh)], ['В приложении', C.money(R.a.app)], ['За час', R.a.perH ? C.money(Math.round(R.a.perH)) : '-']];
     cells.forEach(([k, v], i) => {
       const cx = 90 + (i % 2) * 460, cy = 740 + Math.floor(i / 2) * 190;
       rr(cx, cy, 440, 165, 28); x.fillStyle = 'rgba(255,255,255,.05)'; x.fill(); x.strokeStyle = 'rgba(255,255,255,.09)'; x.lineWidth = 2; x.stroke();
@@ -601,16 +606,29 @@
       <div class="between ci-o"><div class="over">Как ты сегодня?</div>${md ? '' : xpChip(XPN().mood)}</div>${moodRow(md)}
       ${started ? `<div class="over ci-o">Сколько спал, ч</div>${sleepRow(sl)}` : ''}</section>`;
   }
+  // запас к первой смене такси: сколько будет на руках и сколько нужно, чтобы аренда до своей машины и её покупка в срок
+  // не опустили деньги ниже запаса на старт (core.runway). «Хватает» только если и прогноз покупает машину в срок
   function runwayCard(m) {
     const rw = m.rw, g = m.st.set;
     if (!rw) return '';
-    const okB = rw.at >= rw.need, tone = rw.neg ? 'coral' : okB ? 'green' : 'yellow';
+    // со своей машиной деньги уходят в минус до срока: на старт хватает, но зелёным не красим
+    const negO = negBy(m);
+    // нехватка на экране с округлением вверх до тысячи: добавишь показанное, и хватит. Меньше тысячи это шум округления сверок
+    const sh = rw.short >= 1000 ? Math.ceil(rw.short / 1000) * 1000 : 0;
+    const startOk = sh <= 0 && !m.fc.warn, okB = startOk && !negO, tone = rw.neg ? 'coral' : okB ? 'green' : 'yellow';
     const inMon = mk => C.MON[+mk.slice(5) - 1].replace(/ь$/, 'е').replace(/й$/, 'е').replace(/т$/, 'те');
-    const low = rw.neg ? `Деньги кончатся в ${inMon(rw.neg)}.` : rw.low < rw.need && rw.lowMk && Math.round(rw.low / 1000) < Math.round(rw.at / 1000) ? `Меньше всего денег будет в ${inMon(rw.lowMk)}: около ${C.money(Math.round(rw.low / 1000) * 1000)}.` : '';
-    const fix = rw.short > 0 ? (rw.extraH > 0 && rw.extraH <= 6 ? `Чтобы хватило, добавь <b>${C.num1(Math.ceil(rw.extraH * 2) / 2)} ч доставки в день</b> или урежь конверты месяца.` : 'Одной доставкой не закрыть: урежь жильё (хостел) или конверты месяца.') : 'Запаса хватает на старт такси.';
-    return `<section class="card"><div class="between"><div class="over">Запас на старт такси</div><span class="chip ${tone}">${okB ? ic('check') + 'хватает' : ic('down') + 'не хватает'}</span></div>
-      <div class="fc-date">${moneyHtml(Math.round(rw.at / 1000) * 1000)}</div>
-      <div class="fc-sub">будет на руках к ${C.dateLong(g.taxiFrom)}. Нужно на старт около ${C.money(rw.need)}${rw.short > 0 ? `, не хватает ${C.money(Math.round(rw.short / 1000) * 1000)}` : ''}. ${low}</div>
+    const low = rw.neg ? `Деньги кончатся в ${inMon(rw.neg)}.` : rw.low < rw.at && rw.lowMk && r1k(rw.low) < r1k(rw.at) ? `Меньше всего денег до такси будет в ${inMon(rw.lowMk)}: около ${C.money(r1k(rw.low))}.` : '';
+    const bufT = rw.buf > 0 ? ` и запас ${C.money(rw.buf)}` : '';
+    const what = rw.carMk ? (rw.buf > 0 ? `аренда до своей машины, её покупка ${C.dateLong(g.carFrom)}${bufT}` : `аренда до своей машины и её покупка ${C.dateLong(g.carFrom)}`) : `первые 3 месяца такси${bufT}`;
+    // часы доставки советуем, только если неделя подработки с ними не выше потолка часов
+    const pre = g.preTpl || [], preDays = pre.filter(x => x > 0).length, capOk = rw.extraH > 0 && weekOf(pre) + Math.ceil(rw.extraH * 2) / 2 * preDays <= capOf(g);
+    const fix = sh > 0 ? (capOk && rw.extraH <= 6 ? `Чтобы хватило, добавь <b>${C.num1(Math.ceil(rw.extraH * 2) / 2)} ч доставки в день</b> или урежь конверты месяца.` : 'Одной доставкой не закрыть: урежь жильё (хостел) или конверты месяца.')
+      : m.fc.warn ? 'По прогнозу машина в срок не покупается: смотри Прогноз ниже.'
+      : negO ? (rw.carMk ? `На старт и покупку хватает, но со своей машиной деньги уйдут в минус ${inMonth(negO)}: смотри Прогноз ниже.` : `На старт хватает, но на аренде деньги кончатся ${inMonth(negO)}: смотри Прогноз ниже.`)
+      : rw.carMk ? 'Запаса хватает на старт такси и на свою машину.' : 'Запаса хватает на первые месяцы такси.';
+    return `<section class="card"><div class="between"><div class="over">Запас на старт такси</div><span class="chip ${tone}">${okB ? ic('check') + 'хватает' : startOk ? ic('down') + 'на старт хватает' : ic('down') + 'не хватает'}</span></div>
+      <div class="fc-date">${moneyHtml(r1k(rw.at))}</div>
+      <div class="fc-sub">${nb(`будет на руках к ${C.dateLong(g.taxiFrom)}. Нужно около ${C.money(r1k(rw.need))}: ${what}.${sh > 0 ? ` Не хватает ${C.money(sh)}.` : ''} ${low}`)}</div>
       <p class="lead">${fix}</p></section>`;
   }
   // конверты месяца: заработок по очереди заполняет жильё, машину, еду, связь и хотелки; дальше всё в цель
@@ -651,80 +669,169 @@
       <div class="tiles-wrap">${D.tiles(t.n, t.total, t.start)}</div>
       <div class="sub">Плитка = ${C.money(t.value)} активов, каждая новая +${XPN().tile} XP. Загорается при сверке денег${next ? `, следующая от ${C.money(next)}` : ''}.</div></section>`;
   }
-  // сколько будет к сроку при выручке чуть хуже и чуть лучше: вилка в тенге
+  // сколько будет к сроку при выручке как в плохом и хорошем месяце исследования 18.11 (2 500 и 3 400 при вероятных 2 900): вилка в тенге
+  const R_LO = 2500 / 2900, R_HI = 3400 / 2900;
   function rangeLine(m) {
     const st = m.st, mk = C.mkOf(st.set.deadline), R0 = m.fc.R, at = f => { const r = f.rows.find(x => x.mk === mk); return r ? r.na : null; };
-    const lo = at(C.forecast(st, TODAY, { R: R0 * 0.88 })), mid = at(m.fc), hi = at(C.forecast(st, TODAY, { R: R0 * 1.15 }));
+    // пояснение к минусу по прогнозу плохого месяца: купит ли он машину, решает его собственный warn, а не основного прогноза
+    const flo = C.forecast(st, TODAY, { R: R0 * R_LO }), lo = at(flo), mid = at(m.fc), hi = at(C.forecast(st, TODAY, { R: R0 * R_HI }));
     if (lo == null || hi == null) return '';
     const f = v => (v < 0 ? '−' : '') + mlnShort(Math.abs(v));
     return `<div class="range"><div class="over">К ${C.dateLong(st.set.deadline)} будет</div><div class="range-v"><span>от</span><b class="${lo < 0 ? 'down' : ''}">${f(lo)}</b><span>до</span><b class="up">${f(hi)}</b></div>
-      <div class="sub">По прогнозу ${f(mid)}. Вилка: выручка от ${C.money(Math.round(R0 * 0.88 / 50) * 50)} до ${C.money(Math.round(R0 * 1.15 / 50) * 50)} в час до вычетов.${lo < 0 ? (m.fc.warn ? ' Минус значит, что без своей машины аренда съедает накопления.' : ' Минус значит, что аренда съедает накопления: переходи на свою машину раньше.') : ''}</div></div>`;
+      <div class="sub">По прогнозу ${f(mid)}. Вилка: пассажиры платят от ${C.money(Math.round(R0 * R_LO / 50) * 50)} до ${C.money(Math.round(R0 * R_HI / 50) * 50)} в час, как в плохой и хороший месяц.${lo < 0 ? (C.phaseAt(st, TODAY) === 'own' ? ' Минус значит, что в плохие месяцы машина, Kaspi и жизнь съедают накопления.' : (flo.warn && !flo.bought) || !st.set.carFrom ? ' Минус значит, что без своей машины аренда съедает накопления.' : ' Минус значит, что аренда съедает накопления: переходи на свою машину раньше.') : ''}</div></div>`;
   }
   // ---------------------------------------------------------------- что если: как решения двигают цель
-  // каждый вариант считается отдельно от текущего плана; включённые вместе дают общую строку внизу
-  function wifOpts(st) {
-    const g = st.set, taxi = C.phaseAt(st, TODAY) !== 'pre' || (g.taxiFrom && g.taxiFrom > TODAY);
+  // каждый вариант считается отдельно от текущего плана; включённые вместе дают общую строку внизу.
+  // Рычаги из исследования 18.11: своя машина раньше (напрямую с Яндексом), 12 ч на линии с 07 до 21 с перерывом днём (около +5% к оплате
+  // в час, данных мало), жильё дешевле (хостел или подселение). Часы меняют неделю плана: новый день платит аренду, бензин и мойку,
+  // часы сверх 12 в смене идут по 0,95
+  const capOf = g => g.maxWeek > 0 ? g.maxWeek : 72;
+  const weekOf = tpl => (tpl || []).reduce((a, b) => a + (+b || 0), 0);
+  // неделя такси по плану и сколько часов ещё помещается под потолок; capped: прибавка часов не влезает под потолок
+  function wifRoom(st) {
+    const g = st.set, taxi = C.phaseAt(st, TODAY) !== 'pre' || !!(g.taxiFrom && g.taxiFrom > TODAY);
     const wk = [0, 1, 2, 3, 4, 5, 6].map(i => +((g.tpl || [])[i] || 0)), sh = wk.filter(h => h > 0), avg = sh.length ? sh.reduce((a, b) => a + b, 0) / sh.length : 12;
-    const scale = (e, k) => { const o = {}; C.ENV.forEach(x => { o[x] = Math.max(0, (+e[x] || 0) * k); }); return o; };
-    const life = (gg, cut) => { for (const key of ['env', 'envPre']) { const sum = C.envSum(gg[key]); if (sum > cut) gg[key] = scale(gg[key], (sum - cut) / sum); } gg.living = C.envSum(gg.env); gg.preLiving = C.envSum(gg.envPre); };
-    // часы сверх потолка недели не предлагаем: он для того и стоит
-    const out = [], room = (g.maxWeek > 0 ? g.maxWeek : 72) - wk.reduce((a, b) => a + b, 0);
-    if (taxi && sh.length < 7 && avg <= room) out.push({ id: 'shift', title: sh.length === 6 ? `Без выходного, +${C.num1(avg)} ч в неделю` : `+1 смена в неделю, ${C.num1(avg)} ч`, extra: avg });
-    if (taxi && sh.length && sh.length <= room) out.push({ id: 'hour', title: '+1 час к каждой смене', extra: sh.length });
-    out.push({ id: 'life', title: 'Жить на 20 000 ₸ в месяц дешевле', set: gg => life(gg, 20000) });
-    if (taxi) out.push({ id: 'rev', title: 'Выручка в час на 10% выше', rk: 1.1 });
-    if (!st.car && g.carFrom && C.addMonths(g.carFrom, -2) > (g.taxiFrom || TODAY) && C.addMonths(g.carFrom, -2) > TODAY) out.push({ id: 'car', title: 'Своя машина на 2 месяца раньше', set: gg => { gg.carFrom = C.addMonths(gg.carFrom, -2); } });
-    if (g.fuel !== 'gas' && (st.car || g.carFrom)) out.push({ id: 'gas', title: `Поставить газ, ${C.money(g.gasCost)}`, set: gg => { gg.fuel = 'gas'; gg.gasFrom = st.car ? C.isoAdd(TODAY, 1) : ''; } });
+    const room = capOf(g) - weekOf(wk), day = sh.length < 7 && avg <= room, hour = sh.length > 0 && sh.length <= room;
+    return { taxi, sh, avg, room, day, hour, capped: taxi && sh.length < 7 && !day && !hour };
+  }
+  // жильё дешевле хостела не бывает: 30 000 в месяц в ценах ноября 2026 (хостел 25-33 тыс., CLAUDE.md)
+  const HOSTEL = 30000;
+  // short: как вариант звучит в строке «Помогут ...»; unsure: данных мало, эффект пишем как «около»
+  function wifOpts(st) {
+    const g = st.set, W = wifRoom(st), { taxi, sh, avg } = W, out = [];
+    // часы сверх потолка недели не предлагаем: он для того и стоит.
+    // Без выходного у Первого не берут: для 7/0 проверенное предложение QAZ_park 11 300 в день + 5% (Яндекс Гараж, 18.11.2026), и аренда, и процент
+    if (taxi && W.day) out.push({ id: 'shift', title: sh.length === 6 ? `Без выходного, +${C.num1(avg)} ч в неделю` : `+1 смена в неделю, ${C.num1(avg)} ч`, short: sh.length === 6 ? 'смены без выходного' : '+1 смена в неделю',
+      set: gg => { const i = gg.tpl.findIndex(x => !(x > 0)); if (i >= 0) gg.tpl[i] = avg; if (gg.tpl.every(x => x > 0)) { gg.rentDay = 11300; gg.park = 5; } } });
+    if (taxi && W.hour) out.push({ id: 'hour', title: '+1 час к каждой смене', short: '+1 час к смене', set: gg => { gg.tpl = gg.tpl.map(x => x > 0 ? x + 1 : 0); } });
+    // хостел или подселение вместо съёмного жилья: до 60 000 в месяц (жизнь 180 000 вместо 240 000 в исследовании), но не дешевле хостела,
+    // и только если выходит от 10 000
+    const home = +(g.env && g.env.home) || 0, cut = Math.min(60000, Math.round((home - HOSTEL) / 1000) * 1000);
+    if (cut >= 10000) out.push({ id: 'life', title: `Жильё на ${C.money(cut)} дешевле: хостел или подселение`, short: 'жильё дешевле (хостел или подселение)', set: gg => {
+      for (const k of ['env', 'envPre']) if (gg[k]) { const h = +gg[k].home || 0; if (h > HOSTEL) gg[k].home = Math.max(HOSTEL, h - cut); }
+      gg.living = C.envSum(gg.env); gg.preLiving = C.envSum(gg.envPre); } });
+    // 12 ч на линии с 07 до 21 с перерывом днём: около +5% к оплате в час, но это две смены одного водителя и байга (данных мало)
+    if (taxi) out.push({ id: 'peaks', title: '12 ч на линии с 07 до 21, перерыв днём', short: '12 ч на линии с 07 до 21 с перерывом днём', rk: 1.05, unsure: true });
+    if (!st.car && g.carFrom && C.addMonths(g.carFrom, -2) > (g.taxiFrom || TODAY) && C.addMonths(g.carFrom, -2) > TODAY) out.push({ id: 'car', title: 'Своя машина на 2 месяца раньше', short: 'своя машина на 2 месяца раньше', set: gg => { gg.carFrom = C.addMonths(gg.carFrom, -2); } });
     return out;
   }
   function wifRun(st, R, list) {
-    const s2 = Object.assign({}, st, { set: Object.assign({}, st.set, { env: Object.assign({}, st.set.env), envPre: Object.assign({}, st.set.envPre) }) });
-    let extra = 0, rk = 1;
-    for (const o of list) { if (o.set) o.set(s2.set); extra += o.extra || 0; rk *= o.rk || 1; }
-    const f = C.forecast(s2, TODAY, { R: R * rk, extraWeek: extra }), mk = C.mkOf(st.set.deadline), r = f.rows.find(x => x.mk === mk);
-    return { goal: f.goal ? f.goal.iso : null, na: r ? r.na : null };
+    const s2 = Object.assign({}, st, { set: Object.assign({}, st.set, { tpl: (st.set.tpl || []).slice(), env: Object.assign({}, st.set.env), envPre: Object.assign({}, st.set.envPre) }) });
+    let rk = 1;
+    for (const o of list) { if (o.set) o.set(s2.set); rk *= o.rk || 1; }
+    // вместе часов больше потолка недели: такой план не считаю
+    const week = weekOf(s2.set.tpl), cap = capOf(st.set);
+    if (week > Math.max(cap, weekOf(st.set.tpl))) return { over: week, cap };
+    const f = C.forecast(s2, TODAY, { R: R * rk }), mk = C.mkOf(st.set.deadline), r = f.rows.find(x => x.mk === mk);
+    return { goal: f.goal ? f.goal.iso : null, na: r ? r.na : null, se: f.seOver };
   }
-  // как вариант меняет цель: дни раньше или позже, а если цели нет, то деньги к сроку
-  function wifEffect(base, x) {
-    if (base.goal && x.goal) { const d = C.isoDiff(x.goal, base.goal); return d > 0 ? { t: 'на ' + days(d) + ' раньше', up: true } : d < 0 ? { t: 'на ' + days(-d) + ' позже', up: false } : { t: 'без разницы', up: null }; }
-    if (!base.goal && x.goal) return { t: 'успеешь к ' + C.dateShort(x.goal) + ' ' + x.goal.slice(0, 4), up: true };
-    if (base.na != null && x.na != null) { const d = x.na - base.na; return { t: (d >= 0 ? '+' : '−') + mlnShort(Math.abs(d)) + ' к сроку', up: d > 0 }; }
-    return { t: '', up: null };
+  // как вариант меняет цель: дни раньше или позже, а если цели нет, то деньги к сроку. Вариант, где данных мало, пишем как «около»
+  function wifEffect(base, x, o) {
+    const u = !!(o && o.unsure), dl = S().set.deadline;
+    let e = { t: '', up: null };
+    if (base.goal && x.goal) { const d = C.isoDiff(x.goal, base.goal); e = d > 0 ? { t: (u ? 'примерно ' : '') + 'на ' + days(d) + ' раньше', up: true } : d < 0 ? { t: (u ? 'примерно ' : '') + 'на ' + days(-d) + ' позже', up: false } : { t: 'без разницы', up: null }; }
+    else if (!base.goal && x.goal) {
+      const late = dl ? C.isoDiff(dl, x.goal) : 0, when = C.dateShort(x.goal) + ' ' + x.goal.slice(0, 4);
+      e = { t: (u ? 'может быть, ' : '') + (late > 0 ? 'цель ' + when + ', позже срока на ' + days(late) : 'успеешь к ' + when), up: true };
+    }
+    else if (base.na != null && x.na != null) { const d = x.na - base.na; e = Math.abs(d) < 5000 ? { t: 'без разницы', up: null } : { t: (u ? 'около ' : '') + (d >= 0 ? '+' : '−') + (u ? mln1(Math.abs(d)) : mlnShort(Math.abs(d))) + ' к сроку', up: d > 0 }; }
+    if (u && e.up !== null && !(o && o.noTag)) e.t += ' · данных мало';
+    return e;
   }
+  // доход месяца выше лимита самозанятого: одна короткая строка (с июля 2027 ...)
+  const seLine = mk => nb(`С ${C.dateLong(mk + '-01').replace(/^1 /, '')} доход самозанятого больше ${C.money(C.seLimit(mk))} в месяц, это выше лимита: нужно ИП.`);
+  // все варианты считаются один раз на версию данных, день и выручку: их же берут строки «Помогут ...» на Главной и в Пути
   let wifMemo = null;
-  function wifBlock(m) {
-    if (!UI.wif) return `<button class="wif-open" data-a="wif">${ic('sliders')}<span>Что если</span>${ic('down')}</button>`;
+  function wifCalc(m) {
     const st = m.st, R = m.fc.R, key = st.updated + '|' + TODAY + '|' + R;
     if (!wifMemo || wifMemo.key !== key) {
       const opts = wifOpts(st), base = wifRun(st, R, []);
-      wifMemo = { key, opts, base, eff: opts.map(o => wifEffect(base, wifRun(st, R, [o]))) };
+      wifMemo = { key, opts, base, runs: opts.map(o => wifRun(st, R, [o])) };
+      wifMemo.eff = wifMemo.runs.map((x, i) => wifEffect(base, x, opts[i]));
     }
-    const W = wifMemo, on = UI.wifOn || (UI.wifOn = new Set());
+    return wifMemo;
+  }
+  // после срока сравнивать варианты не с чем (деньги к сроку уже не посчитать): Что если и строку Помогут не показываем
+  const pastDl = st => !!st.set.deadline && TODAY > st.set.deadline;
+  function wifBlock(m) {
+    if (pastDl(m.st)) return '';
+    if (!UI.wif) return `<button class="wif-open" data-a="wif">${ic('sliders')}<span>Что если</span>${ic('down')}</button>`;
+    const st = m.st, W = wifCalc(m), on = UI.wifOn || (UI.wifOn = new Set());
+    // 7/0 и 6/1 по 14 ч выше потолка: в списке их нет, одна строка и ссылка на риски в заметке исследования
+    const capNote = wifRoom(st).capped ? `<p class="sub wif-cap">${nb(`7/0 и 6/1 по 14 ч выше твоего потолка ${capOf(st.set)} ч в неделю.`)} <a class="in-ln" data-a="kb-open" data-id="econ" data-v="Графики" role="button" tabindex="0">Риски в заметке Доход в Экономе</a>.</p>` : '';
     return `<div class="wif"><button class="wif-open on" data-a="wif">${ic('sliders')}<span>Что если</span>${ic('up')}</button>
-      ${W.opts.map((o, i) => `<label class="wif-row"><span><b>${esc(o.title)}</b><small class="${W.eff[i].up === true ? 'up' : W.eff[i].up === false ? 'dn' : ''}">${W.eff[i].t}</small></span><input type="checkbox" data-wif="${o.id}"${on.has(o.id) ? ' checked' : ''}></label>`).join('')}
-      <div class="wif-sum" id="wif-sum">${wifSum(m)}</div></div>`;
+      ${W.opts.map((o, i) => `<label class="wif-row"><span><b>${esc(nb(o.title))}</b><small class="${W.eff[i].up === true ? 'up' : W.eff[i].up === false ? 'dn' : ''}">${W.eff[i].t}${W.runs[i].se && !W.base.se ? ' · нужно ИП' : ''}</small></span><input type="checkbox" data-wif="${o.id}"${on.has(o.id) ? ' checked' : ''}></label>`).join('')}
+      <div class="wif-sum" id="wif-sum">${wifSum(m)}</div>${capNote}</div>`;
   }
   function wifSum(m) {
-    const W = wifMemo, on = UI.wifOn; if (!W || !on || !on.size) return 'Отметь варианты, и здесь будет, что выйдет вместе.';
-    const list = W.opts.filter(o => on.has(o.id)), x = wifRun(m.st, m.fc.R, list), e = wifEffect(W.base, x);
-    return x.goal ? `Вместе: цель <b>${C.dateLong(x.goal)}</b>, ${e.t}.` : `Вместе: до цели пока не доходит, ${e.t}.`;
+    const W = wifCalc(m), on = UI.wifOn;
+    if (!on || !on.size) return 'Отметь варианты, и здесь будет, что выйдет вместе.' + (W.base.se ? ' ' + seLine(W.base.se) : '');
+    const list = W.opts.filter(o => on.has(o.id)), x = wifRun(m.st, m.fc.R, list);
+    if (x.over) return `Вместе выходит ${C.num1(x.over)} ч в неделю, это выше твоего потолка ${x.cap} ч. Такой план не считаю.`;
+    const unsure = list.some(o => o.unsure), e = wifEffect(W.base, x, { unsure, noTag: true }), dl = m.st.set.deadline, late = x.goal && dl ? C.isoDiff(dl, x.goal) : 0;
+    // цель появилась только вместе: дата одна, без «успеешь к» с той же датой
+    return (x.goal ? `Вместе: цель <b>${C.dateLong(x.goal)}</b>${W.base.goal ? ', ' + e.t : late > 0 ? ', позже срока на ' + days(late) : ''}.` : e.t ? `Вместе: до цели пока не доходит, ${e.t}.` : 'Вместе: до цели пока не доходит.')
+      + (unsure ? ' Это прикидка: про 12 ч с 07 до 21 данных мало.' : '') + (x.se ? ' ' + seLine(x.se) : '');
+  }
+  // что двигает цель кроме часов: одна строка для Главной и Пути из тех вариантов Что если, что правда приближают цель
+  // или прибавляют денег к сроку, от самого сильного. Газ не рычаг: Яндекс Про в Астане проверяет машину без ГБО
+  function levers(m) {
+    if (pastDl(m.st)) return '';
+    const W = wifCalc(m), and = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' и ' + a[a.length - 1] : a[0] || '';
+    const list = W.opts.map((o, i) => ({ o, x: W.runs[i], e: W.eff[i] })).filter(v => v.e.up === true).sort((a, b) => (b.x.na || 0) - (a.x.na || 0));
+    return list.length ? nb('Помогут ' + and(list.map(v => v.o.short + (v.o.unsure ? ' (данных мало)' : ''))) + '.') : '';
+  }
+  // когда по прогнозу кончатся деньги: первый месяц с минусом на руках (или уже сейчас)
+  const runOut = fc => fc.s0.cash < 0 ? C.mkOf(fc.s0.iso) : (fc.rows.find(r => r.cash < 0) || {}).mk || null;
+  // когда до срока деньги уходят в минус после старта: со своей машиной (negOwn) или на аренде без машины в плане
+  const negBy = m => { const g = m.st.set, n = m.fc.negOwn || (!g.carFrom ? runOut(m.fc) : null); return n && (!g.deadline || n <= C.mkOf(g.deadline)) ? n : null; };
+  // со своей машиной прогноз держит запас startBuf, но если до срока деньги всё равно уходят в минус, говорим когда
+  const negOwnT = m => {
+    const n = m.fc.negOwn, dl = m.st.set.deadline, buf = m.st.set.startBuf || 0;
+    if (C.phaseAt(m.st, TODAY) === 'own' && m.fc.s0.cash < 0) return ' ' + nb(buf > 0 ? `Деньги уже в минусе: запаса ${C.money(buf)} не хватило.` : 'Деньги уже в минусе.');
+    return n && (!dl || n <= C.mkOf(dl)) ? ' ' + nb(`Деньги уйдут в минус ${inMonth(n)}` + (buf > 0 ? `: запаса ${C.money(buf)} не хватит.` : '.')) : '';
+  };
+  // план ломается: цели нет, прогноз так и не купил машину по плану, и деньги уходят в минус. Месяц, когда кончаются деньги
+  const brokenAt = m => !m.fc.goal && m.fc.warn && m.st.set.carFrom && !m.fc.bought ? runOut(m.fc) : null;
+  // своя машина по плану: сколько нужно на покупку (взнос и оформление в ценах месяца покупки). Дата прошла: месяц, когда прогноз
+  // её не купил, или сегодня
+  function carNeed(m) {
+    const g = m.st.set, w = m.fc.warn, past = g.carFrom < TODAY, mk = past ? (w ? w.mk : C.mkOf(TODAY)) : C.mkOf(g.carFrom);
+    return { date: past ? null : g.carFrom, need: C.startCost(g, mk) };
   }
   function forecastCard(m) {
     const st = m.st, dl = st.set.deadline;
     if (m.na >= m.target) return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Цель есть</div><div class="fc-sub">${C.money(m.na)} активов. Дальше Отбасы и квартира.</div></section>`;
     if (!m.fc.goal) {
-      const w = m.fc.warn, ex = m.need.extra;
-      const why = w && st.set.carFrom ? `К ${C.dateLong(st.set.carFrom)} не хватит около ${C.money(Math.round(w.short / 1000) * 1000)} на взнос за свою машину, а на аренде до цели не дойти.` : `При таком плане до ${C.money(m.target)} не дойти.`;
-      const how = ex ? ` С +${C.num1(ex)} ч в неделю машина будет, и к сроку успеваешь.` : m.need.capped ? ' Помогут меньше трат на жизнь (конверты) или машина дешевле.' : ' Помогут меньше трат на жизнь (конверты), машина дешевле или 7 смен в неделю.';
-      return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div><div class="fc-sub">${why}${how}</div>${rangeLine(m)}${wifBlock(m)}</section>`;
+      // нехватку на машину не зовём взносом: отдельно, когда кончатся деньги и сколько нужно на покупку. Если прогноз так и не купил
+      // машину, план ломается: годы растущего минуса не показываем
+      const w = m.fc.warn, ex = m.need.extra, out = runOut(m.fc), lv = levers(m);
+      let why = `При таком плане до ${C.money(m.target)} не дойти.`, broken = false;
+      // без машины в плане деньги на аренде кончаются до срока: называем месяц
+      if (!st.set.carFrom && out && (!dl || out <= C.mkOf(dl))) why += ` Деньги кончатся ${inMonth(out)}.`;
+      if (w && st.set.carFrom) {
+        const c = carNeed(m), carT = `На машину${c.date ? ' ' + C.dateLong(c.date) : ''} нужно около ${C.money(r1k(c.need))}: взнос, страховки, регистрация и первое ТО.`;
+        if (!m.fc.bought) {
+          // копит ли аренда: в среднем по месяцам аренды в прогнозе после жизни в плюсе или нет
+          broken = true;
+          const rr = m.fc.rows.filter(r => r.ph === 'rent'), saves = rr.length > 0 && rr.reduce((a, r) => a + r.free, 0) / rr.length > 0;
+          const tail = saves ? ', а на аренде копится слишком медленно' : ', а на аренде они не копятся';
+          why = (m.fc.s0.cash < 0 ? `Деньги уже в минусе${tail}.`
+            : out && (!dl || out <= C.mkOf(dl)) ? `План ломается ${inMonth(out)}: деньги кончаются${st.set.taxiFrom && out < C.mkOf(st.set.taxiFrom) ? ' ещё до такси' : ''}${tail}.`
+            : saves ? 'На аренде копится слишком медленно: к сроку на машину не хватает.' : 'На аренде деньги почти не копятся, и на машину не накопить.') + ' ' + carT;
+        }
+        else why = `Своя машина выйдет только ${inMonth(m.fc.bought)}. ` + carT + (out ? ` Деньги кончатся ${inMonth(out)}.` : '');
+      }
+      const how = ex ? ` С +${C.num1(ex)} ч в неделю машина будет, и к сроку успеваешь.` : lv ? ' ' + lv : '';
+      return `<section class="card"><div class="over">Прогноз</div><div class="fc-date">Пока не доходит</div><div class="fc-sub">${nb(why)}${negOwnT(m)}${how}</div>${broken ? '' : rangeLine(m)}${wifBlock(m)}</section>`;
     }
     const g = m.fc.goal.iso, diff = C.isoDiff(g, dl), late = diff < 0, span = Math.max(C.isoDiff(TODAY, dl), C.isoDiff(TODAY, g), 1);
     const pf = Math.max(0, Math.min(100, C.isoDiff(TODAY, g) / span * 100)), pd = Math.max(0, Math.min(100, C.isoDiff(TODAY, dl) / span * 100));
-    const ex = m.need.extra;
-    const sub = late ? `Позже срока на <b class="down">${days(-diff)}</b>.` + (ex ? ` Чтобы успеть, добавь <b class="down">${C.num1(ex)} ч в неделю</b>.` : ex === null ? (m.need.capped ? ' Помогут газ, своя машина раньше или меньше расходов.' : ' Одних часов мало. Помогут газ, своя машина раньше или меньше расходов.') : '')
-      : diff === 0 ? 'Ровно в срок' : `На <b>${days(diff)}</b> раньше срока`;
+    const ex = m.need.extra, lv = late && ex === null ? levers(m) : '';
+    const sub = late ? `Позже срока на <b class="down">${days(-diff)}</b>.` + (ex ? ` Чтобы успеть, добавь <b class="down">${C.num1(ex)} ч в неделю</b>.` : ex === null ? (m.need.capped ? '' : ' Одних часов мало.') + (lv ? ' ' + lv : '') : '')
+      : diff === 0 ? 'Ровно в срок.' : `На <b>${days(diff)}</b> раньше срока.`;
     return `<section class="card"><div class="over">Прогноз цели</div>
-      <div class="fc-date">${C.dateLong(g)}</div><div class="fc-sub">${sub}</div>${rangeLine(m)}
+      <div class="fc-date">${C.dateLong(g)}</div><div class="fc-sub">${sub}${negOwnT(m)}</div>${rangeLine(m)}
       <div class="tl"><div class="tl-track"></div><div class="tl-done" style="width:${pf.toFixed(1)}%"></div>
         <div class="tl-fl${late ? ' late' : ''}" style="left:${Math.max(8, Math.min(92, pf)).toFixed(1)}%">прогноз</div><div class="tl-dot" style="left:0"></div>
         <div class="tl-end" style="left:${pd.toFixed(1)}%"></div><div class="tl-dot ${late ? 'late' : 'fc'}" style="left:${pf.toFixed(1)}%"></div></div>
@@ -763,8 +870,10 @@
   // ближе всего к получению: награды с наибольшим прогрессом
   function nearBadges(pl) {
     const got = pl.badges.filter(b => b.on).length;
-    const near = pl.badges.filter(b => !b.on && b.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 3);
-    const list = near.length ? near : pl.badges.filter(b => !b.on).slice(0, 3);
+    // длинные смены (13 и 15 ч) не подталкиваем: к 12-му часу риск происшествий выше. Получить их можно, но сюда они не попадают
+    const push = b => !b.on && b.id !== 'long-13' && b.id !== 'long-15';
+    const near = pl.badges.filter(b => push(b) && b.pct > 0).sort((a, b) => b.pct - a.pct).slice(0, 3);
+    const list = near.length ? near : pl.badges.filter(push).slice(0, 3);
     return `<div class="sec-h"><div class="h3">Ближе всего</div><button class="link" data-a="tab" data-tab="me">${got} из ${pl.badges.length} наград ${ic('right')}</button></div>
       <section class="card">${list.map(b => `<button class="nb" data-a="badge" data-id="${b.id}">${D.medal(b.icon, b.color || 'violet', true, 38)}<div><div class="nb-t"><b>${esc(b.title)}</b>${xpChip(b.xp)}</div>
         <div class="pbar"><i style="width:${(b.pct * 100).toFixed(1)}%"></i></div><div class="nb-s">${esc(b.hint.split('. ')[0])}: ${progText(b)}</div></div></button>`).join('')}</section>`;
@@ -785,14 +894,21 @@
     const ds = Array.from({ length: 7 }, (_, i) => C.isoAdd(mon, i));
     if (!UI.sel || UI.sel < mon || UI.sel > ds[6]) { UI.sel = ds.indexOf(TODAY) >= 0 ? TODAY : ds[0]; UI.dh = null; UI.dapp = ''; UI.dord = ''; }
     const wk = C.weekStats(st, mon, fc, TODAY), mk = C.mkOf(UI.week === 0 ? TODAY : mon), mo = C.monthStats(st, mk, fc, TODAY), planAll = weekPlan(st, mon);
-    const mr = C.measuredR(st, TODAY, 120), sc = C.scenarioOf(mr.n >= 3 ? mr.R : null), scHint = sc ? scHintOf(st, C.phaseOn(st.set, TODAY) === 'own' ? 'own' : 'rent', sc.key) : '';
+    // своя выручка за 30 дней на той машине, что сейчас (как на Цифрах): цифра за 12 ч против порогов месяца по модели,
+    // уровень без сезона, разгона новичка и роста против вероятных 2 900, а сама оплата пассажиров как есть.
+    // mrF: все смены такси за 120 дней, по ним считает прогноз
+    const phT = C.phaseAt(st, TODAY), taxiNow = phT !== 'pre', mrF = taxiNow ? C.measuredR(st, TODAY, 120) : null, mr = taxiNow ? C.measuredR(st, TODAY, 29, phT) : null;
+    // цифра за 12 ч та же, что на Цифрах: смены этой машины за 30 дней в ценах этого месяца, средняя по часам (shiftStats)
+    const zs = mr && mr.n >= 3 ? C.shiftStats(st, TODAY).zones : null, a12 = zs && zs.avg != null ? zs.avg : null, Z = a12 ? zs.Z : null, sc = a12 ? C.scenarioOf(mr.R) : null;
+    // сразу после покупки на своей смен ещё нет: только прикидка по прошлым сменам в этом месяце, без вывода по зонам
+    const proj = !a12 && phT === 'own' && mrF && mrF.n >= 3 ? C.appPer12(st, TODAY, mrF.R * C.growth(st.set, C.mkOf(TODAY))[1] * C.seasonOf(st.set, C.mkOf(TODAY)), 'own') : null;
     const label = UI.week === 0 ? 'Эта неделя' : UI.week === -1 ? 'Прошлая неделя' : UI.week === 1 ? 'Следующая неделя' : 'Неделя';
     const closed = planAll > 0 && wk.fact >= planAll && ds[6] < TODAY;
     const preNow = !st.set.taxiFrom || TODAY < st.set.taxiFrom, tplKey = preNow ? 'preTpl' : 'tpl', tpl = st.set[tplKey] || [];
     return `
     <header class="top"><div><div class="top-k">Смены</div><h1 class="top-t top-fit">${label}</h1></div><div class="top-r">${streakPill(pl)}</div></header>
     <section class="card">
-      <div class="between"><div class="over">${+mon.slice(8)}${mon.slice(5, 7) !== ds[6].slice(5, 7) ? ' ' + C.dateShort(mon).split(' ')[1] : ''}–${C.dateShort(ds[6])}</div>
+      <div class="between"><div class="over">${+mon.slice(8)}${mon.slice(5, 7) !== ds[6].slice(5, 7) ? ' ' + C.dateShort(mon).split(' ')[1] : ''}-${C.dateShort(ds[6])}</div>
         <div class="top-r"><button class="icon-btn" data-a="week" data-v="-1" aria-label="Неделя назад">${ic('left')}</button><button class="icon-btn" data-a="week" data-v="1" aria-label="Неделя вперёд">${ic('right')}</button></div></div>
       <div class="wk-h"><div class="wk-t">${C.num1(wk.fact)} <span>из ${C.num1(planAll)} ч</span></div><div class="wk-m">${wk.app ? `<b>${C.money(wk.app)}</b><span>в приложении</span>` : ''}</div></div>
       <div class="bars">${ds.map(d => barCol(st, d)).join('')}</div>
@@ -800,22 +916,45 @@
     </section>
     ${dayPanel(st, UI.sel, fc)}
     ${UI.week === 0 ? bossCard(pl) : ''}
-    <section class="card"><div class="over">${cap(C.MON[+mk.slice(5) - 1])}</div>${statsBlock(mo)}
+    <section class="card"><div class="over">${cap(C.MON[+mk.slice(5) - 1])}</div>${statsBlock(mo)}${seNote(st, mk)}
       <button class="row-btn st-more" data-a="stats">${ic('chart')}<span>Все цифры</span>${ic('right')}</button></section>
-    ${mr.n >= 3 ? `<section class="card"><div class="over">Твоя выручка в такси</div>
-      <p class="lead">За 12 ч в приложении в среднем <b>${C.money(C.appPer12(st, TODAY, mr.R) || 0)}</b>.${sc ? ` Это ${esc(scHint)}.` : ''}</p>
-      <div class="sub">По последним ${mr.n} ${C.plural(mr.n, ['смене', 'сменам', 'сменам'])}${st.set.rLog && mr.n >= 10 ? '. Прогноз уже считается по ним.' : '. С 10 смен прогноз начнёт считаться по ним.'}</div></section>` : ''}
+    ${a12 ? revCard(st, mr, mrF, a12, Z, sc) : proj ? `<section class="card"><div class="over">Твоя выручка в такси</div>
+      <p class="lead">${mr && mr.n > 0 ? `На своей машине пока ${mr.n} ${C.plural(mr.n, ['смена', 'смены', 'смен'])}.` : 'На своей машине смен пока нет.'} По прошлым сменам на ней было бы около <b>${C.money(Math.round(proj / 100) * 100)}</b> за 12 ч.</p></section>` : ''}
     <section class="card"><div class="over">${preNow ? 'Обычная неделя подработки' : 'Обычная неделя такси'}</div>
       <div class="tpl">${C.DOW.map((n, i) => `<button class="tpl-d${tpl[i] ? '' : ' off'}" data-a="tpl" data-i="${i}" data-k="${tplKey}"><span>${n}</span><b>${tpl[i] ? C.num1(tpl[i]) : ic('moon')}</b></button>`).join('')}</div>
       <div class="sub">Нажми на день, чтобы поменять часы. Разовый выходной или смену ставь на конкретный день выше.</div></section>`;
   }
-  // что значит выручка: на аренде и на своей машине по-разному (план считается по надёжному сценарию)
-  const SC_HINT = {
-    rent: { bad: 'ниже плана: на аренде в минус, нужны своя машина и газ', reliable: 'как в плане: на аренде почти ничего не остаётся, своя машина как можно раньше', mid: 'лучше плана: на аренде уже можно понемногу копить', good: 'намного лучше плана: можно копить и на аренде' },
-    own: { badGas: 'ниже плана: смотри часы пик и районы', bad: 'ниже плана, догнать поможет газ', reliable: 'как в плане', mid: 'лучше плана', good: 'намного лучше плана' },
+  // что значит цифра за 12 ч по порогам месяца: на аренде, на своей с Kaspi и после кредита.
+  // Совет про свою машину только после 4 недель смен: раньше твой уровень ещё не виден (исследование 18.11)
+  const ZONE_SAY = {
+    rent: { g: 'можно класть 150 000 в месяц в Отбасы даже на аренде', y: 'после жизни в плюсе, но на 150 000 в Отбасы не хватает', r: 'после жизни минус, про машину решишь после 4 недель смен', r4: 'после жизни минус, своя машина нужна как можно раньше' },
+    loan: { g: 'хватает на Kaspi и 150 000 в месяц в Отбасы', y: 'после жизни и Kaspi плюс, но 150 000 в Отбасы пока не выходит', r: 'после жизни и Kaspi минус' },
+    free: { g: 'можно класть 150 000 в месяц в Отбасы', y: 'после жизни плюс, но 150 000 в Отбасы пока не выходит', r: 'после жизни минус' },
   };
-  // газ уже стоит: советовать его не нужно
-  const scHintOf = (st, ph, key) => ph === 'own' && key === 'bad' && st.set.fuel === 'gas' && (!st.set.gasFrom || st.set.gasFrom <= TODAY) ? SC_HINT.own.badGas : SC_HINT[ph][key];
+  const zoneSay = (st, kind, z) => kind === 'rent' && z === 'r' && weeks4(st) ? ZONE_SAY.rent.r4 : ZONE_SAY[kind][z];
+  // 4 недели смен такси: с первой записанной смены прошло 4 недели и смен не меньше 10
+  function weeks4(st) {
+    let first = null, n = 0;
+    for (const [d, x] of Object.entries(st.shifts)) if (d <= TODAY && x && x.h > 0 && C.phaseAt(st, d) !== 'pre') { n++; if (!first || d < first) first = d; }
+    return !!first && n >= 10 && C.isoDiff(first, TODAY) >= 27;
+  }
+  const andList = a => a.length > 1 ? a.slice(0, -1).join(', ') + ' и ' + a[a.length - 1] : a[0] || '';
+  // чем смены за окно отличаются от летнего месяца опытного водителя: сезон, первые недели такси, рост выручки после июля 2027
+  function adjWhy(st, days, car) {
+    const g = st.set, from = C.isoAdd(TODAY, -days), ds = Object.keys(st.shifts).filter(d => d <= TODAY && d > from && st.shifts[d] && st.shifts[d].h > 0 && st.shifts[d].app > 0 && C.phaseAt(st, d) !== 'pre' && (!car || C.phaseAt(st, d) === car));
+    const why = [ds.some(d => Math.abs(C.seasonOf(g, C.mkOf(d)) - 1) > 0.01) ? 'сезон' : '', ds.some(d => C.rampOf(g, d) < 1) ? 'первые недели' : '', ds.some(d => C.growth(g, C.mkOf(d))[1] > 1.015) ? 'рост цен' : ''].filter(Boolean);
+    return andList(why.length ? why : ['сезон']);
+  }
+  // выручка в такси на Сменах: цифра за 12 ч и вывод по зоне месяца, оплата пассажиров в час как есть, а против вероятных 2 900
+  // сравниваем уровень без сезона, разгона новичка и роста цен (как прогноз). Первые 2 месяца у новичка ниже, это нормально
+  function revCard(st, mr, mrF, a12, Z, sc) {
+    const g = st.set, newbie = g.ramp !== false && !!g.taxiFrom && C.isoDiff(g.taxiFrom, TODAY) < 60;
+    const lvl = Math.abs(mr.R / mr.raw - 1) >= 0.03 ? `, с поправкой на ${adjWhy(st, 30, C.phaseAt(st, TODAY))} это ${sc.name}` : `: ${sc.name}`;
+    const own = C.phaseAt(st, TODAY) === 'own' && mrF.n > mr.n;
+    return `<section class="card"><div class="over">Твоя выручка в такси</div>
+      <p class="lead">За 12 ч в приложении в среднем <b>${C.money(Math.round(a12 / 100) * 100)}</b>${Z && mr.n >= 10 ? ': ' + nb(zoneSay(st, Z.kind, C.zoneOf(Z, a12))) + '.' : '. Вывод будет с 10 смен.'}</p>
+      <div class="sub">${nb(`Пассажиры платят ${C.money(Math.round(mr.raw / 10) * 10)} в час${lvl}.`)}${newbie ? ' Первые два месяца у новичка обычно ниже.' : ''} По ${mr.n} ${C.plural(mr.n, ['смене', 'сменам', 'сменам'])}${own ? ' на своей машине' : ''} за 30 дней.${g.rLog && mrF.n >= 10 ? ' Прогноз уже считается по твоим сменам с поправкой на сезон.' : ' С 10 смен прогноз начнёт считаться по ним.'}</div></section>`;
+  }
   function barCol(st, d) {
     const p = C.planHours(st, d), x = st.shifts[d], h = x ? +x.h : null, future = d > TODAY, k = 104 / 16;
     const cls = (d === TODAY ? ' today' : '') + (d === UI.sel && d !== TODAY ? ' sel' : '');
@@ -833,7 +972,7 @@
     } else {
       const working = (st.set.preFrom && d >= st.set.preFrom) || (st.set.taxiFrom && d >= st.set.taxiFrom);
       col = working ? `<div class="bar-off">${ic('moon')}</div>` : '';
-      val = `<span class="bar-v dim">${working ? 'вых' : '–'}</span>`;
+      val = `<span class="bar-v dim">${working ? 'вых' : '-'}</span>`;
     }
     return `<button class="bar${cls}" data-a="day" data-d="${d}" aria-label="${C.DOWL[C.dow(d)]} ${C.dateShort(d)}"><span class="bar-d">${C.DOW[C.dow(d)]}</span><div class="bar-col">${col}</div>${val}</button>`;
   }
@@ -918,16 +1057,16 @@
     return `<section class="card"><div class="between"><div><div class="over">Моя машина</div><div class="h3">${esc(c.name)}</div></div><button class="link" data-a="car-edit">${ic('gear')}Изменить</button></div>
       <div class="sub">Куплена ${C.dateLong(c.on)}, ${c.loan ? 'в кредит' : 'за наличные'}. Стоит сейчас около ${C.money(r1k(now.car))}.</div>
       ${loan}
-      <div class="sub">Расход ${C.num1(g.l100)} л на 100 км, ${fuel === 'gas' ? 'газ' : 'бензин'} ${C.money(Math.round((fuel === 'gas' ? g.gas : g.petrol) * F))} за литр. Топливо по плану месяца около ${C.money(r1k(fm))}.</div></section>`;
+      <div class="sub">Расход в среднем ${C.num1(g.l100)} л на 100 км, зимой больше, ${fuel === 'gas' ? 'газ' : 'бензин'} ${C.money(Math.round((fuel === 'gas' ? g.gas : g.petrol) * F))} за литр. Топливо по плану месяца около ${C.money(r1k(fm))}.</div></section>`;
   }
   // аренда или своя: по твоим сменам за 30 дней, только пока ездишь на аренде
   function rentOwnCard(m) {
     const st = m.st, g = st.set; if (st.car || C.phaseAt(st, TODAY) !== 'rent') return '';
     const r = C.rentVsOwn(st, TODAY); if (!r) return '';
-    const preset = C.CARS.find(c => c.price === g.price && c.down === g.down), name = preset ? 'своей машине (' + preset.name + ')' : 'своей машине по плану', d = r.own - r.rent;
+    const preset = C.CARS.find(c => c.price === g.price && c.down === g.down), name = preset ? 'своей машине (' + preset.name + ')' : 'своей машине по плану', d = r1k(r.own) - r1k(r.rent); // разница из тех же округлённых сумм, что на экране
     return `<section class="card"><div class="between"><div class="over">Аренда или своя</div><span class="link">по ${r.n} ${C.plural(r.n, ['смене', 'сменам', 'сменам'])} за 30 дней</span></div>
       <div class="kv"><div><span>На аренде осталось</span><b class="${r.rent < 0 ? 'down' : ''}">${C.money(r1k(r.rent))}</b></div><div><span>На своей было бы</span><b class="${d > 0 ? 'up' : ''}">${C.money(r1k(r.own))}</b></div></div>
-      <p class="sub">${d > 0 ? `На ${esc(name)} за те же смены оставалось бы на <b class="up">${C.money(r1k(d))}</b> в месяц больше${r.pay > 0 ? `, уже после платежа по кредиту ${C.money(r1k(r.pay))}` : ''}. И машина остаётся твоей.` : `Пока аренда не хуже своей машины${r.pay > 0 ? ` с платежом ${C.money(r1k(r.pay))}` : ''}: можно не спешить.`} На взнос и оформление нужно около ${C.money(r1k(r.start))}.</p></section>`;
+      <p class="sub">${d > 0 ? `На ${esc(name)} за те же смены оставалось бы на <b class="up">${C.money(r1k(d))}</b> больше${r.pay > 0 ? `, уже после платежа по кредиту` : ''}. И машина остаётся твоей.${weeks4(st) ? '' : ' Но решай после 4 недель смен.'}` : `Пока аренда не хуже своей машины${r.pay > 0 ? ` с платежом ${C.money(r1k(r.pay))} в месяц` : ''}: можно не спешить.`} ${nb(`На машину нужно около ${C.money(r1k(r.start))}: взнос, страховки, регистрация и первое ТО.`)}</p></section>`;
   }
   // покупка или правка своей машины
   function carSheet() {
@@ -945,8 +1084,8 @@
         <div class="fld2"><label class="fld"><span>Платёж в месяц, ₸</span><input inputmode="numeric" id="f-clp" value="${fmtIn(L ? L.pay : 0)}" placeholder="из графика"></label>
           <label class="fld"><span>Первый платёж</span><input type="date" id="f-clf" value="${L && L.first ? L.first : C.addMonths(c ? c.on : TODAY, 1)}"></label></div>
         <div class="sub" id="car-calc"></div></div>
-      <div class="fld"><span>Топливо</span><div class="segm">${[['petrol', 'бензин'], ['gas', 'газ']].map(([x, n]) => `<button data-a="car-fuel" data-v="${x}" aria-pressed="${UI.carFuel === x}">${n}</button>`).join('')}</div></div>
-      <div class="fld2"><label class="fld"><span>Расход, л на 100 км</span><input inputmode="decimal" id="f-cl" value="${C.num1(g.l100)}"></label>
+      <div class="fld"><span>Топливо</span><div class="segm">${[['petrol', 'бензин'], ['gas', 'газ']].map(([x, n]) => `<button data-a="car-fuel" data-v="${x}" aria-pressed="${UI.carFuel === x}">${n}</button>`).join('')}</div><p class="sub" id="f-gas-n"${UI.carFuel === 'gas' ? '' : ' hidden'}>${GAS_NOTE}</p></div>
+      <div class="fld2"><label class="fld"><span>Расход в среднем за год, л на 100 км</span><input inputmode="decimal" id="f-cl" value="${C.num1(g.l100)}"></label>
         <label class="fld"><span id="f-cf-l">Литр ${UI.carFuel === 'gas' ? 'газа' : 'бензина'}, ₸</span><input inputmode="numeric" id="f-cf" data-petrol="${fp('petrol')}" data-gas="${fp('gas')}" value="${fmtIn(fp(UI.carFuel))}"></label></div>
       <label class="fld"><span>Примерная цена продажи через 3 года, ₸</span><input inputmode="numeric" id="f-cv" value="${fmtIn(c ? c.v36 : 0)}"></label>
       ${c ? '' : `<label class="fld"><span>Денег осталось после покупки, ₸</span><input inputmode="numeric" data-neg="1" id="f-cc"></label><div class="sub" id="f-cc-n"></div>`}
@@ -966,11 +1105,11 @@
     const cc = $('#f-cc'), note = $('#f-cc-n');
     if (cc) {
       const on = ($('#f-con') || {}).value || TODAY, last = C.lastMoney(st, TODAY), F = C.growth(g, TODAY.slice(0, 7))[0];
-      const costs = (g.ogpo + g.osgop + g.regFee + g.diag) * F, cash = nowParts(st).cash, paid = loan ? Math.max(0, price - sum) : price;
+      const costs = (g.ogpo + g.osgop + g.regFee + g.diag + (g.buyOther || 0)) * F, cash = nowParts(st).cash, paid = loan ? Math.max(0, price - sum) : price;
       const counted = last && last.d >= on; // сверка после покупки уже знает про трату
       if (!UI.ccTouched) cc.value = fmtIn(r1k(cash - (counted ? 0 : paid + costs)));
       if (note) note.textContent = counted ? `Подставил деньги по последней сверке: около ${C.money(r1k(cash))}. Поправь, сколько на самом деле.`
-        : `Подставил: сейчас около ${C.money(r1k(cash))}, минус ${loan ? 'взнос' : 'цена'} и оформление (страховки, регистрация, диагностика) около ${C.money(r1k(costs))}. Поправь, сколько на самом деле.`;
+        : `Подставил: сейчас около ${C.money(r1k(cash))}, минус ${loan ? 'взнос' : 'цена'} и оформление (страховки, регистрация, диагностика, первое ТО) около ${C.money(r1k(costs))}. Поправь, сколько на самом деле.`;
     }
   }
   // досрочное гашение
@@ -1025,7 +1164,10 @@
   }
   function chart(m) {
     const st = m.st, W = 340, H = 180, P = 10, top = 16;
-    const dl = C.mkOf(st.set.deadline), fcRows = m.fc.rows.filter(r => r.mk <= dl), base = st.base ? st.base.rows.filter(r => r.mk <= dl) : [];
+    // план ломается: прогноз рисуем до месяца, когда кончаются деньги, а план, который до срока так и остаётся в минусе, до первого
+    // месяца этого минуса. Годы растущего долга не рисуем, как и в плитках Пути
+    const dl = C.mkOf(st.set.deadline), brk = brokenAt(m), fcRows = m.fc.rows.filter(r => r.mk <= dl && (!brk || r.mk <= brk));
+    const bAll = st.base ? st.base.rows.filter(r => r.mk <= dl) : [], bLast = bAll.map(r => r.na >= 0).lastIndexOf(true), base = bAll.slice(0, bLast + 2);
     const ml = C.moneyLine(st, TODAY);
     const pts = [...base.map(r => r.na), ...fcRows.map(r => r.na), ...ml.map(p => p.na), m.target, 0];
     const lo = Math.min(...pts), hi = Math.max(...pts);
@@ -1075,24 +1217,27 @@
     return { L, car: { seg: lastDone + 1, t }, next: nx };
   }
   function vPath() {
-    const m = model(), st = m.st, ph = C.phaseNow(st, TODAY, m.fc), R = stationsOf(m), ex = m.need.extra;
+    const m = model(), st = m.st, ph = C.phaseNow(st, TODAY, m.fc), R = stationsOf(m), ex = m.need.extra, lv = m.na < m.target && ex == null ? levers(m) : '';
+    // в плитке без ₸: «−1,17 млн» помещается в 360 px
+    // план ломается (прогноз так и не купил машину, деньги кончились): с этого месяца годы растущего минуса не показываем, как на Главной
+    const brk = brokenAt(m);
     const yrs = [0, 1, 2].map(i => +TODAY.slice(0, 4) + i).filter(y => y <= +st.set.deadline.slice(0, 4)).map(y => {
-      const mk = y + '-12', fr = m.fc.rows.find(r => r.mk === mk), br = st.base && st.base.rows.find(r => r.mk === mk);
-      return `<div class="yr"><span>Конец ${y}</span><b>${fr ? C.mln(fr.na) : '-'}</b><small>план ${br ? C.mln(br.na).replace(/\s₸$/, '') : '-'}</small></div>`;
+      const mk = y + '-12', fr = m.fc.rows.find(r => r.mk === mk), br = st.base && st.base.rows.find(r => r.mk === mk), gone = brk && mk >= brk;
+      return `<div class="yr"><span>Конец ${y}</span><b${gone ? ' class="down"' : ''}>${gone ? 'минус' : fr ? C.mln(fr.na).replace(/\s₸$/, '') : '-'}</b><small>план ${br ? (br.na < 0 ? 'минус' : C.mln(br.na).replace(/\s₸$/, '')) : '-'}</small></div>`;
     }).join('');
     const Q = G.quests(st, TODAY, m.fc), nx = R.next;
     const nxt = nx ? (nx.key === 'loan' ? 'кредит закрыт' : nx.key === 'goal' ? C.money(m.target) + ' активов' : nx.key === 'otb' ? 'депозиту Отбасы 3 года' : nx.title.toLowerCase()) : '';
     return `
-    <header class="top"><div><div class="top-k">Путь</div><h1 class="top-t">Этап ${ph.n} из ${ph.total}</h1></div><div class="top-r"><button class="icon-btn" data-a="kb" aria-label="Заметки из Ноушена">${ic('book')}</button></div></header>
+    <header class="top"><div><div class="top-k">Путь</div><h1 class="top-t">Этап ${ph.n} из ${ph.total}</h1></div><div class="top-r"><button class="icon-btn" data-a="kb" aria-label="Заметки">${ic('book')}</button></div></header>
     <section class="road-card"><div class="road-head"><div class="ibox violet">${ic('route')}</div><div><div class="road-k">Сейчас</div><div class="road-t">${esc(ph.title)}</div></div></div>
       ${D.road(R.L, R.car, m.pl.skin, null)}
       <div class="stages" style="margin:10px 18px 0">${C.PHASES.map((_, i) => `<i class="${i + 1 < ph.n ? 'done' : i + 1 === ph.n ? 'now' : ''}"></i>`).join('')}</div>
-      <div class="road-foot"><span>${nx ? `Дальше: <b>${esc(nxt)}</b>, ${C.dateLong(nx.date)}${nx.key === 'loan' || nx.key === 'goal' ? ' по прогнозу' : ''}` : 'Все вехи пройдены'}</span></div></section>
-    <section class="card"><div class="over">Чтобы успеть к ${C.dateLong(st.set.deadline)}</div>
-      <p class="lead">${m.na >= m.target ? 'Цель уже есть.' : ex === 0 ? `Успеваешь с запасом <b>${days(m.need.slackDays)}</b>.` : ex ? `Добавь <b>${C.num1(ex)} ч в неделю</b> к обычному графику.` : m.need.capped ? `Больше ${m.need.cap} ч в неделю не советую, это потолок из настроек. Помогут газ, своя машина раньше или меньше расходов: их цену видно в Что если на Главной.` : 'Одних часов мало. Помогут газ, своя машина раньше или меньше расходов.'}</p>
+      <div class="road-foot"><span>${nx ? `Дальше: <b>${esc(nxt)}</b>, ${nx.key === 'goal' && !m.fc.goal ? `срок ${C.dateLong(nx.date)}, по прогнозу пока не доходит` : C.dateLong(nx.date) + (nx.key === 'loan' || nx.key === 'goal' ? ' по прогнозу' : '')}` : 'Все вехи пройдены'}</span></div></section>
+    <section class="card"><div class="over">${pastDl(st) && m.na < m.target ? 'Срок был ' : 'Чтобы успеть к '}${C.dateLong(st.set.deadline)}</div>
+      <p class="lead">${m.na >= m.target ? 'Цель уже есть.' : pastDl(st) ? 'Срок прошёл, а цели пока нет. Новый срок ставится в Настройках.' : ex === 0 ? `Успеваешь с запасом <b>${days(m.need.slackDays)}</b>.` : ex ? `Добавь <b>${C.num1(ex)} ч в неделю</b> к обычному графику.` : (m.need.capped ? `Больше ${m.need.cap} ч в неделю не советую, это потолок из настроек.` : 'Одних часов мало.') + (lv ? ` ${lv} Что они дают, видно в Что если на Главной.` : '')}</p>
       <div class="years">${yrs}</div></section>
     ${locksCard(m)}
-    <button class="card tap block kb-entry" data-a="kb"><span class="kb-ic">${ic('book')}</span><span><b>Заметки из Ноушена</b><small>Итоги, сроки и исследования: 8 страниц и 18 таблиц</small></span>${ic('right')}</button>
+    <button class="card tap block kb-entry" data-a="kb"><span class="kb-ic">${ic('book')}</span><span><b>Заметки</b><small>Доход в Экономе, итоги, сроки и исследования</small></span>${ic('right')}</button>
     <div class="sec-h"><div class="h3">Задания</div><span class="link">${Q.open.length}</span></div>
     <section class="card">${Q.open.map(q => questRow(q, false)).join('') || '<p class="lead">Все задания сделаны.</p>'}
       <button class="add-q" data-a="quest-new">${ic('plus')}Своё задание</button></section>
@@ -1209,12 +1354,30 @@
     d.byId = {}; for (const n of d.notes) d.byId[n.id] = n;
     return d;
   }
+  // открыть заметку поверх списка (Назад вернёт к списку) и прокрутить к разделу, если он задан
+  function kbOpenNote(id, sec) {
+    UI.kbNote = id; UI.kbStack = [null]; UI.subDepth = 2; UI.kbScroll = 0; UI.kbSec = sec || '';
+    try { history.pushState({ put: 'kbnote' }, ''); } catch (e) { /* ок */ }
+    render(); kbSecGo();
+  }
+  // раздел по началу заголовка; пока заметки расшифровываются, ждём (kbEnsure прокрутит после)
+  function kbSecGo() {
+    const n = UI.kbSec && KB.data && KB.data.byId[UI.kbNote];
+    let hid = null;
+    if (n) kbWalk(n.blocks, b => { if (!hid && b.t === 'h' && kbPlain(b.x).indexOf(UI.kbSec) === 0) hid = b.id; });
+    const h = hid && document.getElementById(hid);
+    if (h) { UI.kbSec = ''; h.scrollIntoView({ block: 'start' }); } else { if (KB.data) UI.kbSec = ''; window.scrollTo(0, 0); }
+  }
   function kbEnsure() {
     const st = S(), k = st.kb && st.kb.k;
     if (KB.data || KB.busy || !k || (KB.err && KB.errK === k)) return;
     KB.busy = true;
     kbDecrypt(unb64u(k)).then(d => { KB.data = d; KB.err = null; }).catch(e => { KB.err = ['key', 'none', 'old'].indexOf(e.message) >= 0 ? e.message : 'net'; KB.errK = k; })
-      .finally(() => { KB.busy = false; if (UI.sub === 'kb') render(); });
+      .finally(() => {
+        KB.busy = false; if (UI.sub !== 'kb') return;
+        // ключ пришёл из облака после входа: заметка, на которую вела ссылка, открывается сразу
+        if (KB.data && UI.kbPend) { const p = UI.kbPend; UI.kbPend = null; kbOpenNote(p.id, p.sec); } else { render(); if (UI.kbSec) kbSecGo(); }
+      });
   }
   async function kbUnlock() {
     const inp = $('#kb-code'), code = inp ? inp.value : '', btn = document.querySelector('[data-a="kb-unlock"]');
@@ -1226,13 +1389,15 @@
       const uid = Store.cloud && Store.cloud.user ? Store.cloud.user.uid || null : null;
       Store.update(s => { s.kb = { k: b64u(raw), u: Math.max(Date.now(), ((s.kb && s.kb.u) || 0) + 1), uid }; }, 'kb');
       toast('Заметки открыты. Код сохранён в твоём аккаунте: на других устройствах они откроются сами.', 'good'); buzz([12, 40, 12]);
+      if (UI.kbPend) { const p = UI.kbPend; UI.kbPend = null; kbOpenNote(p.id, p.sec); }
     } catch (e) { toast(KB_ERR[e.message] || KB_ERR.net, 'warn'); }
     finally { if (btn) btn.disabled = false; }
   }
   const KB_ERR = { key: 'Код не подошёл. Проверь буквы и цифры.', none: 'Заметок пока нет на сайте.', old: 'Браузер устарел: обнови его, и заметки откроются.', net: 'Нет связи. Попробуй, когда появится интернет.' };
   // числа и единицы не рвутся на строки: 3 000 ₸, 12 ч, 9,6-12 млн. Ссылки не трогаем
   const kbNb = h => h.replace(/(\d) (?=\d{3}(?!\d))/g, '$1\u00a0').replace(/(\d) (₸|%|млн|тыс|км|мес|ч(?![а-яё])|л(?![а-яё]))/g, '$1\u00a0$2').replace(/(млн|тыс\.?) ₸/g, '$1\u00a0₸').replace(/(\d)-(\d)/g, '$1\u2011$2');
-  const kbLink = (t, u) => u.slice(0, 3) === '#n:' ? `<a class="kb-ln" data-a="kb-note" data-id="${u.slice(3)}">${t}</a>` : u.slice(0, 3) === '#d:' ? `<a class="kb-ln" data-a="kb-dbgo" data-id="${u.slice(3)}">${t}</a>`
+  // #n:id на заметку, #n:id/Раздел сразу на её раздел (по началу заголовка), #d:id на таблицу
+  const kbLink = (t, u) => u.slice(0, 3) === '#n:' ? `<a class="kb-ln" data-a="kb-note" data-id="${u.slice(3).split('/')[0]}"${u.indexOf('/') > 0 ? ` data-v="${u.slice(u.indexOf('/') + 1)}"` : ''}>${t}</a>` : u.slice(0, 3) === '#d:' ? `<a class="kb-ln" data-a="kb-dbgo" data-id="${u.slice(3)}">${t}</a>`
     : /^https?:\/\//.test(u) ? `<a href="${u}" target="_blank" rel="noopener noreferrer">${t}</a>` : t;
   // текст из Ноушена: жирный, код, ссылки (свои страницы и таблицы открываются внутри приложения)
   const kbMd = s => {
@@ -1249,20 +1414,36 @@
     return out + esc(text.slice(pos));
   }
   const kbMeta = n => [n.heads ? n.heads + ' ' + C.plural(n.heads, ['раздел', 'раздела', 'разделов']) : '', n.dbs.length ? n.dbs.length + ' ' + C.plural(n.dbs.length, ['таблица', 'таблицы', 'таблиц']) : ''].filter(Boolean).join(' · ');
+  // таблица в тексте: столбец с числами выровнен вправо; в ячейке с переносом первая строка главная, остальные мельче (подпись)
+  const KB_NUM = /^[−+\-~≈]?\d[\d\s,.\-…−+]*( ?(₸|%|млн|тыс\.?|ч|мес\.?|км|л))?( ₸)?( (в час|в день|в месяц|за смену))?$/;
+  const kbIsNum = c => KB_NUM.test(kbPlain(c).split('\n')[0].replace(/\u00a0/g, ' ').trim());
+  // жирная сумма со знаком (итог строки) зелёная или красная, как суммы в остальном приложении
+  const kbCellMd = c => {
+    const [a, ...rest] = String(c).split('\n'), sign = /^\*\*[−+]\d/.test(a) ? (a.charAt(2) === '+' ? 'up' : 'down') : '';
+    return (sign ? kbMd(a).replace('<b>', `<b class="${sign}">`) : kbMd(a)) + (rest.length ? `<small class="kb-sub">${kbMd(rest.join('\n'))}</small>` : '');
+  };
+  function kbTable(rows) {
+    const body = rows.slice(1);
+    const num = rows[0].map((_, j) => { const cs = body.map(r => r[j] || '').filter(c => c.trim()); return j > 0 && cs.length > 0 && cs.filter(kbIsNum).length >= cs.length * 0.6; });
+    const tag = (t, j, c, row) => `<${t}${row ? ' scope="row"' : ''}${num[j] ? ' class="n"' : ''}>${kbCellMd(c)}</${t}>`;
+    return `<div class="kb-tw"><table class="kb-t${rows[0].length > 2 ? ' wide' : ''}">${rows.map((r, i) => `<tr>${r.map((c, j) => i === 0 ? tag('th', j, c) : j === 0 ? tag('th', 0, c, true) : tag('td', j, c)).join('')}</tr>`).join('')}</table></div>`;
+  }
+  // значок выноски: имя значка приложения (wallet, bolt) или эмодзи из Ноушена
+  const kbCallIc = i => !i ? '' : `<span class="kb-call-i">${/^[a-z]+$/.test(i) ? ic(i) : esc(i)}</span>`;
   function kbBlocks(bs) {
     return (bs || []).map(b => {
       if (b.t === 'h') return b.l === 3 ? `<h4 id="${b.id}">${kbMd(b.x)}</h4>` : `<h3 id="${b.id}">${kbMd(b.x)}</h3>`;
       if (b.t === 'p') return `<p>${kbMd(b.x)}</p>`;
       if (b.t === 'ul' || b.t === 'ol') return `<${b.t}>${b.items.map(it => `<li>${kbMd(it.x)}${it.c ? kbBlocks(it.c) : ''}</li>`).join('')}</${b.t}>`;
       if (b.t === 'todo') return `<ul class="kb-todo">${b.items.map(it => `<li class="${it.done ? 'on' : ''}"><i>${it.done ? ic('check') : ''}</i><span>${kbMd(it.x)}</span></li>`).join('')}</ul>`;
-      if (b.t === 'call') return `<div class="kb-call">${b.i ? `<span class="kb-call-i">${esc(b.i)}</span>` : ''}<div>${kbBlocks(b.c)}</div></div>`;
+      if (b.t === 'call') return `<div class="kb-call${b.i ? ' has-i' : ''}">${kbCallIc(b.i)}<div>${kbBlocks(b.c)}</div></div>`;
       if (b.t === 'quote') return `<blockquote>${kbMd(b.x)}</blockquote>`;
-      if (b.t === 'table') return `<div class="kb-tw"><table class="kb-t${b.rows[0].length > 2 ? ' wide' : ''}">${b.rows.map((r, i) => `<tr>${r.map((c, j) => i === 0 ? `<th>${kbMd(c)}</th>` : j === 0 ? `<th scope="row">${kbMd(c)}</th>` : `<td>${kbMd(c)}</td>`).join('')}</tr>`).join('')}</table></div>`;
+      if (b.t === 'table') return kbTable(b.rows);
       if (b.t === 'cols') return `<div class="kb-cols">${b.c.map(col => `<div>${kbBlocks(col)}</div>`).join('')}</div>`;
       if (b.t === 'hr') return '<hr>';
       if (b.t === 'db') return kbDb(b.db);
       if (b.t === 'link') return `<button class="kb-pl" data-a="kb-note" data-id="${b.n}">${ic('book')}<span>${esc(b.x)}</span>${ic('right')}</button>`;
-      if (b.t === 'tog') return `<details class="kb-tog"><summary>${kbMd(b.x)}</summary>${kbBlocks(b.c)}</details>`;
+      if (b.t === 'tog') return `<details class="kb-tog"><summary><span>${kbMd(b.x)}</span><i class="kb-chev">${ic('right')}</i></summary><div class="kb-tog-b">${kbBlocks(b.c)}</div></details>`;
       return '';
     }).join('');
   }
@@ -1318,13 +1499,14 @@
   }
   const kbItem = n => `<button class="kb-item" data-a="kb-note" data-id="${n.id}"><span class="kb-ic">${ic(n.icon)}</span><span class="kb-it"><b>${esc(n.short)}</b><small>${esc(n.lead)}</small><em>${kbMeta(n)}</em></span>${ic('right')}</button>`;
   function kbList() {
-    const d = KB.data, main = d.byId.main, rows = Object.values(d.dbs).reduce((s, x) => s + x.rows.length, 0), q = KB.q.trim();
+    // наверху свежее исследование 18.11 (доход в Экономе), без него сводная страница Ноушена
+    const d = KB.data, hero = d.byId.econ || d.byId.main, rows = Object.values(d.dbs).reduce((s, x) => s + x.rows.length, 0), q = KB.q.trim();
     return `<label class="kb-search">${ic('search')}<input id="kb-q" type="search" placeholder="Поиск по заметкам и таблицам" value="${esc(KB.q)}" autocomplete="off"></label>
       <div id="kb-res">${q ? kbResults(q) : ''}</div>
       <div id="kb-home"${q ? ' hidden' : ''}>
-        ${main ? `<button class="kb-hero" data-a="kb-note" data-id="main"><div class="over">Главное</div><b>${esc(main.short)}</b><p>${esc(main.lead)}</p><span class="kb-go">Читать ${ic('right')}</span></button>` : ''}
-        ${['Итоги', 'Планы и сроки', 'Исследования'].map(g => { const list = d.notes.filter(n => n.group === g && n.id !== 'main'); return list.length ? `<div class="sec-h"><div class="h3">${g}</div></div><section class="card kb-list">${list.map(kbItem).join('')}</section>` : ''; }).join('')}
-        <p class="sub kb-foot">Копия страниц Ноушена: ${d.notes.length} ${C.plural(d.notes.length, ['страница', 'страницы', 'страниц'])} и ${Object.keys(d.dbs).length} ${C.plural(Object.keys(d.dbs).length, ['таблица', 'таблицы', 'таблиц'])}, ${C.grp(rows)} ${C.plural(rows, ['строка', 'строки', 'строк'])}.</p>
+        ${hero ? `<button class="kb-hero" data-a="kb-note" data-id="${hero.id}"><div class="over">Главное</div><b>${esc(hero.short)}</b><p>${esc(hero.lead)}</p><span class="kb-go">Читать ${ic('right')}</span></button>` : ''}
+        ${['Итоги', 'Планы и сроки', 'Исследования'].map(g => { const list = d.notes.filter(n => n.group === g && n !== hero); return list.length ? `<div class="sec-h"><div class="h3">${g}</div></div><section class="card kb-list">${list.map(kbItem).join('')}</section>` : ''; }).join('')}
+        <p class="sub kb-foot">Страницы Ноушена и исследование 18.11: ${d.notes.length} ${C.plural(d.notes.length, ['страница', 'страницы', 'страниц'])} и ${Object.keys(d.dbs).length} ${C.plural(Object.keys(d.dbs).length, ['таблица', 'таблицы', 'таблиц'])}, ${C.grp(rows)} ${C.plural(rows, ['строка', 'строки', 'строк'])}.</p>
       </div>`;
   }
   function kbNoteView(n) {
@@ -1352,7 +1534,7 @@
     const other = !!(cl.user && st.kb && st.kb.uid && cl.user.uid && st.kb.uid !== cl.user.uid);
     if (cl.user && cl.user.uid && st.kb && key && !st.kb.uid && !other) Store.update(s => { if (s.kb) s.kb.uid = cl.user.uid; }, 'seen');
     const head = n ? `<header class="top kb-top"><div class="top-r"><button class="icon-btn" data-a="kb-back" aria-label="Назад">${ic('left')}</button><button class="top-k kb-tt" data-a="kb-top">${esc(n.short)}</button></div></header>`
-      : `<header class="top"><div class="top-r"><button class="icon-btn" data-a="kb-back" aria-label="Назад">${ic('left')}</button><div><div class="top-k">Из Ноушена</div><h1 class="top-t">Заметки</h1></div></div></header>`;
+      : `<header class="top"><div class="top-r"><button class="icon-btn" data-a="kb-back" aria-label="Назад">${ic('left')}</button><div><div class="top-k">Ноушен и исследования</div><h1 class="top-t">Заметки</h1></div></div></header>`;
     if (!signed) return head + kbLock(false, cl.on && (cl.status === 'loading' || cl.status === 'sync'));
     const bad = KB.err === 'key' && KB.errK === key;
     if (!key || bad || other) return head + kbLock(true, false, bad, other);
@@ -1363,13 +1545,13 @@
     return head + (n ? kbNoteView(n) : kbList());
   }
   // переходы внутри заметок: каждый шаг в истории, кнопка назад возвращает на шаг
-  function kbGo(id, hl, k) {
+  function kbGo(id, hl, k, sec) {
     if (!KB.data || !KB.data.byId[id]) return;
     if (!UI.kbNote) UI.kbScroll = window.scrollY;
     (UI.kbStack = UI.kbStack || []).push(UI.kbNote || null);
     UI.kbNote = id; UI.kbHl = hl || ''; UI.subDepth = (UI.subDepth || 1) + 1;
     try { history.pushState({ put: 'kbnote' }, ''); } catch (e) { /* ок */ }
-    render(); window.scrollTo(0, 0); // render уже подсветил совпадения
+    render(); UI.kbSec = sec || ''; kbSecGo(); // render уже подсветил совпадения; без раздела наверх
     if (UI.kbHl) requestAnimationFrame(() => { const ms = document.querySelectorAll('.kb-body mark'), m = ms[Math.min(ms.length - 1, k || 0)]; if (m) m.scrollIntoView({ block: 'center' }); });
   }
   function kbHighlight(scroll) {
@@ -1405,21 +1587,30 @@
     });
     return `<svg class="st-svg" viewBox="0 0 ${W} ${base + 18}" role="img">${bg}<line class="st-base" x1="0" x2="${W}" y1="${base + 0.5}" y2="${base + 0.5}"/>${bars}${lab}</svg>`;
   }
-  // зоны цифры приложения за 12 ч: на аренде пороги из Ноушена, на своей машине уровни плана (их считает core.shiftStats)
+  // зоны цифры приложения за 12 ч по порогам месяца из модели (core.zonesAt): аренда, своя с Kaspi, своя после кредита
+  const ZONE_ROW = {
+    rent: { g: '150 000 в Отбасы', y: 'после жизни плюс', r: 'после жизни минус' },
+    loan: { g: 'Kaspi и 150 000 в Отбасы', y: 'после жизни и Kaspi плюс', r: 'после жизни и Kaspi минус' },
+    free: { g: '150 000 в Отбасы', y: 'после жизни плюс', r: 'после жизни минус' },
+  };
+  const ZONE_HEAD = { rent: 'На аренде', loan: 'На своей машине, пока платишь Kaspi', free: 'На своей машине без кредита' };
   function stZones(S) {
-    const z = S.zones, n = z.n, [hi, lo] = S.zoneAt, mine = z.own && z.other > 0;
+    const z = S.zones, n = z.n, Z = z.Z, mine = z.own && z.other > 0, kind = z.kind || 'rent';
     // первые дни после покупки машины: в окне только аренда, а считаем свою машину, поэтому говорим это прямо
-    if (!n) return mine ? `<section class="card st-c"><div class="over">Цифра за 12 ч, 30 дней</div><p class="sub">На своей машине смен пока нет: зоны появятся с первой сменой.</p></section>` : '';
+    if (!n || !Z) return mine && Z ? `<section class="card st-c"><div class="over">Цифра за 12 ч, 30 дней</div><p class="sub">На своей машине смен пока нет: зоны появятся с первой сменой.</p></section>` : '';
+    const [hi, lo] = Z.at, R = Z.R;
     const seg = (k, c) => z[k] ? `<i class="${c}" style="flex:${z[k]}"></i>` : '';
     // вывод по средней, и только с 10 смен: по одной-двум сменам решать про машину рано
-    const say = z.own ? { g: z.avgR >= 3700 ? SC_HINT.own.good : SC_HINT.own.mid, y: SC_HINT.own.reliable, r: scHintOf(S2st(), 'own', 'bad') }
-      : { g: 'копишь спокойно', y: 'своя машина нужна как можно раньше', r: 'аренда в минусе, нужны своя машина и газ' };
-    const row = (c, icon, t, k) => `<div class="st-zr"><i class="${c}">${ic(icon)}</i><span>${t}</span><b>${z[k]}</b></div>`;
+    const row = (c, icon, t, k) => `<div class="st-zr"><i class="${c}">${ic(icon)}</i><span>${t}<small>${nb(ZONE_ROW[kind][k])}</small></span><b>${z[k]}</b></div>`;
+    const perH = v => C.grp(Math.round(v / 10) * 10), mon = C.MON[+Z.mk.slice(5) - 1];
     return `<section class="card st-c"><div class="between"><div class="over">Цифра за 12 ч, 30 дней</div><span class="st-cap">${n} ${C.plural(n, ['смена', 'смены', 'смен'])}</span></div>
       <div class="st-stack">${seg('g', 'g')}${seg('y', 'y')}${seg('r', 'r')}</div>
       <div class="st-zl">${row('g', 'check', 'от ' + C.money(hi), 'g')}${row('y', 'clock', C.grp(lo) + '-' + C.money(hi), 'y')}${row('r', 'down', 'меньше ' + C.money(lo), 'r')}</div>
-      <p class="sub">${n < 10 ? `Вывод будет, когда ${mine ? 'на своей машине' : 'за 30 дней'} наберётся 10 смен.` : `В среднем ${C.money(z.avg)} за 12 ч${mine ? ' на своей машине' : ''}: ${say[z.top]}.`}</p></section>`;
+      <p class="sub">${n < 10 ? `Вывод будет, когда ${mine ? 'на своей машине' : 'за 30 дней'} наберётся 10 смен.` : `В среднем ${C.money(Math.round(z.avg / 100) * 100)} за 12 ч${mine ? ' на своей машине' : ''}: ${nb(zoneSay(S2st(), kind, z.top))}.`}</p>
+      <p class="sub st-src">${nb(`${ZONE_HEAD[kind]}. Пороги посчитаны по твоему плану на ${mon} (${Z.sh} ${C.plural(Z.sh, ['смена', 'смены', 'смен'])} по ${C.num1(Math.round(Z.h * 10) / 10)} ч), жизни ${C.money(r1k(Z.life))} и сезону ${monthOf(mon)}. В оплате пассажиров это от ${perH(R[0])} и от ${perH(R[1])} ₸ в час.`)}</p></section>`;
   }
+  // «ноября», «мая»: родительный падеж месяца
+  const monthOf = mon => C.MONG[C.MON.indexOf(mon)] || mon;
   const S2st = () => S();
   function stMonths(S) {
     // с первого месяца, где есть смены, но не меньше 6 столбцов: пустой год слева ни к чему
@@ -1453,10 +1644,15 @@
     const me = S.me, mx = me ? X(me.rev) : 0;
     const meMark = me ? `<line class="st-me-l" x1="${mx}" x2="${mx}" y1="14" y2="${base + 6}"/><circle class="st-me" cx="${mx}" cy="${base}" r="6"/><text class="st-me-t" x="${Math.max(16, Math.min(W - 16, mx))}" y="10" text-anchor="middle">ты</text>` : '';
     const ticks = [2000, 3000, 4000, 5000].map(v => `<text class="st-lab" x="${X(v)}" y="${base + 24}" text-anchor="middle">${C.grp(v)}</text>`).join('');
+    // вероятная оплата по исследованию 18.11: 2 900 опытного летом с ростом выручки, с сезоном и первыми неделями тех же дней
+    // (core.shiftStats), чтобы водитель ровно на уровне исследования стоял на пунктире. Подпись с той стороны, где нет твоей линии
+    const px = X(S.likely), side = me && mx <= px + 1 ? 1 : -1, r10 = v => C.grp(Math.round(v / 10) * 10);
+    const likT = S.likely && Math.abs(S.likely / S.likelyBase - 1) >= 0.02 ? `Пунктир: вероятно в эти дни ${r10(S.likely)}, с поправкой на ${adjWhy(S2st(), 30)} (летом у опытного ${r10(S.likelyBase)}).` : `Пунктир: вероятно ${r10(S.likelyBase)}.`;
+    const likely = S.likely ? `<line class="st-p50" x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="16" y2="${base + 6}"/><text class="st-p50-t" x="${(px + side * 5).toFixed(1)}" y="25" text-anchor="${side > 0 ? 'start' : 'end'}">вероятно</text>` : '';
     return `<section class="card st-c"><div class="over">Ты среди водителей</div>
-      <div class="st-cap st-cap2">${me ? `Ты: <b>${C.money(Math.round(me.rev))} выручки в час</b>, ${!me.above ? `ниже всех ${me.total} отчётов` : me.above === me.total ? `выше всех ${me.total} отчётов` : `выше, чем в ${me.above} из ${me.total} отчётов`}` :'Покажу твоё место, когда за 30 дней будет 3 смены такси с суммой.'}</div>
-      <svg class="st-svg" viewBox="0 0 ${W} ${base + 30}" role="img"><line class="st-base" x1="${x0}" x2="${x1}" y1="${base + 8.5}" y2="${base + 8.5}"/>${dots}${meMark}${ticks}</svg>
-      <p class="sub">Выручка пассажиров в час: твоя за 30 дней и отчёты водителей Астаны из исследования, часто за короткие смены в часы пик.</p></section>`;
+      <div class="st-cap st-cap2">${me ? `Ты: <b>${C.money(Math.round(me.rev))} оплаты пассажиров в час</b>, ${!me.above ? `ниже всех ${me.total} отчётов` : me.above === me.total ? `выше всех ${me.total} отчётов` : `выше, чем в ${me.above} из ${me.total} отчётов`}` :'Покажу твоё место, когда за 30 дней будет 3 смены такси с суммой.'}</div>
+      <svg class="st-svg" viewBox="0 0 ${W} ${base + 30}" role="img"><line class="st-base" x1="${x0}" x2="${x1}" y1="${base + 8.5}" y2="${base + 8.5}"/>${likely}${dots}${meMark}${ticks}</svg>
+      <p class="sub">${nb(`Оплата пассажиров в час: твоя за 30 дней и ${S.drivers.length} ${C.plural(S.drivers.length, ['отчёт', 'отчёта', 'отчётов'])} водителей Астаны из исследования 18.11. ${likT} Обычные дни 2 600-3 300, соревнования и удачные дни выше.`)}</p></section>`;
   }
   function stTiles(S) {
     const t = S.tiles, mon = C.MON[+TODAY.slice(5, 7) - 1], tile = (k, v, s) => `<div class="st-t"><span>${k}</span><b>${v}</b>${s ? `<small>${s}</small>` : ''}</div>`;
@@ -1553,7 +1749,7 @@
       <button class="row-btn" data-a="export">${ic('dl')}<span>Скачать копию</span></button>
       <label class="row-btn tap">${ic('ul')}<span>Восстановить из файла</span><input type="file" accept="application/json,.json" data-a="import" hidden></label>
       <button class="row-btn" data-a="stats">${ic('chart')}<span>Цифры: смены и студия</span>${ic('right')}</button>
-      <button class="row-btn" data-a="kb">${ic('book')}<span>Заметки из Ноушена</span>${ic('right')}</button>
+      <button class="row-btn" data-a="kb">${ic('book')}<span>Заметки</span>${ic('right')}</button>
       <button class="row-btn" data-a="sub" data-v="settings">${ic('gear')}<span>Настройки и расчёт</span>${ic('right')}</button></section>
     <div class="sec-h"><div class="h3">Как растёт опыт</div></div>
     <section class="card"><p class="sub" style="margin-top:0">Час работы +${XPN().hour} XP, с комбо серии (+${Math.round(XPN().comboStep * 100)}% за каждую смену подряд) до ×1,5. Сумма за день +${XPN().app}. Задания дня: план +${XPN().planDay}, заработок +${XPN().moneyDay}, заказы +${XPN().ordersDay}, все сразу открывают сундук: обычный 50-120, редкий 150-200, легендарный 300 и наклейка на машину. Неделя без недобора +${XPN().week}, босс месяца +${XPN().boss}, жизнь на месяц оплачена +${XPN().paid}, рекорд +${XPN().record}. Отдых при низкой энергии +${XPN().rest}, отметка настроения +${XPN().mood}. Перевод в Отбасы +${XPN().per1000} за 1 000 ₸, плитка квартиры +${XPN().tile}. Вехи от 150 до 1 000, свои задания +${XPN().own}, награды от 50 до 5 000. Всё считается из записей: поправил смену, опыт пересчитался.</p></section>`;
@@ -1564,7 +1760,7 @@
     return `<div class="sec-h"><div class="h3">Характеристики</div></div><section class="card">
       ${a.list.map(x => `<div class="attr"><div class="attr-i">${ic(x.icon)}</div><div class="attr-b"><div class="attr-t"><b>${esc(x.title)}</b><span>${x.lvl} из 10</span></div>
         <div class="attr-bar">${Array.from({ length: 10 }, (_, i) => `<i class="${i < x.lvl ? 'on' : ''}"></i>`).join('')}</div><div class="attr-s">${esc(x.val)}</div></div></div>`).join('')}
-      <div class="praise green" style="margin-top:12px"><div class="praise-i">${ic('target')}</div><div class="praise-b"><div class="praise-t">Качай: ${esc(a.weak.title)}</div><div class="praise-s">${esc(a.weak.tip)}</div></div></div></section>`;
+      ${a.weak ? `<div class="praise green" style="margin-top:12px"><div class="praise-i">${ic('target')}</div><div class="praise-b"><div class="praise-t">Качай: ${esc(a.weak.title)}</div><div class="praise-s">${esc(a.weak.tip)}</div></div></div>` : ''}</section>`;
   }
   // навыки: очко за каждые 2 уровня, у навыка 3 ступени, ступень открывается с уровня
   function skillsCard(pl) {
@@ -1577,35 +1773,35 @@
         ${x.r < 3 ? (x.can && sk.free > 0 ? `<button class="btn sm perk-btn" data-a="perk" data-id="${x.id}">${ic('plus')}</button>` : `<span class="perk-lock">${ic('lock')}${x.nextLvl} ур.</span>`) : `<span class="perk-lock done">${ic('check')}</span>`}</div>`).join('')}`).join('')}
       ${sk.spent ? '<button class="btn ghost" data-a="perk-reset">Сбросить навыки и вернуть очки</button>' : ''}</section>`;
   }
-  // машина для такси: выбор пересчитывает прогноз; газ как улучшение с окупаемостью
+  // машина для такси: выбор пересчитывает прогноз. Газ не улучшение: Яндекс Про в Астане проверяет машину без ГБО (он только в настройках)
   function carCard(st) {
     const g = st.set, cur = C.CARS.find(c => c.price === g.price && c.down === g.down);
-    const fm = C.fuelMonth(g, C.mkOf(TODAY)), save = Math.round((fm.petrol - fm.gas) / 1000) * 1000, pay = save > 0 ? Math.ceil(g.gasCost / save) : null;
-    const own = C.phaseOn(g, TODAY) === 'own';
     const mine = st.car, lp = mine ? C.loanPlan(st, TODAY) : null;
     return `<div class="sec-h"><div class="h3">Машина для такси</div><span class="link">меняет прогноз</span></div>
       ${mine ? `<section class="card"><button class="car-row on" data-a="car-edit"><span><b>${esc(mine.name)}</b><small>своя с ${C.dateShort(mine.on)} ${mine.on.slice(0, 4)} · ${C.money(mine.price)} · ${lp ? (lp.bal > 0 ? 'кредит ' + C.money(Math.round(lp.pay)) + ' в месяц' : 'кредит закрыт') : 'без кредита'}</small></span>${ic('gear')}</button>
         <div class="sub">Платёж, досрочку и остаток кредита видно в Деньгах, в карточке Моя машина.</div></section>`
       : `<section class="card">${C.CARS.map(c => `<button class="car-row${cur && cur.id === c.id ? ' on' : ''}" data-a="car-preset" data-id="${c.id}">
         <span><b>${esc(c.name)}</b><small>${esc(c.how)} · ${C.money(c.price)} · простой ${C.num1(c.lost)} смены в месяц</small></span>${cur && cur.id === c.id ? ic('check') : ''}</button>`).join('')}
-      <div class="sub">Это примеры для прогноза. Права на автомате дают ездить и на механике, дешёвые машины почти все на механике. Цены: медианы объявлений на 17.11.2026.</div>
-      <div class="btns"><button class="btn alt" data-a="car-buy">${ic('car')}Купил машину: записать свою</button></div></section>`}
-      <section class="card"><div class="between"><div><div class="over">Улучшение</div><div class="h3">Газ (ГБО)</div></div>${g.fuel === 'gas' ? `<span class="chip green">${ic('check')}стоит</span>` : xpChip(G.QUEST_XP.gas)}</div>
-        <p class="lead">${C.money(g.gasCost)} один раз. Экономия на топливе около <b class="up">${C.money(save)}</b> в месяц${pay ? `, окупится за ${pay} ${C.plural(pay, ['месяц', 'месяца', 'месяцев'])}` : ''}.</p>
-        ${g.fuel === 'gas' ? '' : own ? `<div class="btns"><button class="btn sm" data-a="gas-on">${ic('bolt')}Поставил газ</button></div>` : '<div class="sub">Откроется, когда будет своя машина.</div>'}</section>`;
+      <div class="sub">Это примеры для прогноза, все напрямую с Яндексом, без парка. Права на автомате дают ездить и на механике, дешёвые машины почти все на механике. Цены: медианы объявлений на 17.11.2026.</div>
+      <div class="btns"><button class="btn alt" data-a="car-buy">${ic('car')}Купил машину: записать свою</button></div></section>`}`;
   }
   const badgeTile = b => `<button class="bd${b.on ? '' : ' locked'}" data-a="badge" data-id="${b.id}">${D.medal(b.icon, b.color || 'violet', !b.on)}<b>${esc(b.title)}</b><span>${b.on ? C.dateShort(b.on) : progText(b)}</span>${b.on ? '' : `<div class="pbar sm"><i style="width:${(b.pct * 100).toFixed(1)}%"></i></div>`}</button>`;
   const FIELDS = [
     ['Цель', [['target', 'Сумма цели, ₸', 'money'], ['deadline', 'Срок', 'date'], ['why', 'Зачем тебе квартира (увидишь, когда тяжело)', 'text'], ['ds', 'Договорная сумма Отбасы, ₸', 'money', g => C.grp(2 * g.target) + ', вдвое больше цели'], ['maxWeek', 'Потолок часов в неделю', 'num']]],
-    ['До такси: подработка', [['preFrom', 'Подработка с (пусто: без неё)', 'date'], ['preRate', 'Чистыми в час, ₸', 'money'], ['preOnce', 'Разовые траты до такси: автошкола, справки, залоги, ₸', 'money'], ['preOnceDate', 'Когда платишь', 'date'], ['startBuf', 'Нужно на старт такси: залог, первые дни, ₸', 'money']]],
+    ['До такси: подработка', [['preFrom', 'Подработка с (пусто: без неё)', 'date'], ['preRate', 'Чистыми в час, ₸', 'money'], ['preOnce', 'Разовые траты до такси: автошкола, справки, залоги, ₸', 'money'], ['preOnceDate', 'Когда платишь', 'date'], ['startBuf', 'Запас на старт такси: залог, первые дни, ₸', 'money']]],
     ['Конверты до такси, в месяц', C.ENV.map(k => ['envPre.' + k, C.ENV_TITLE[k] + ', ₸', 'money'])],
     ['Конверты на такси, в месяц', C.ENV.map(k => ['env.' + k, C.ENV_TITLE[k] + ', ₸', 'money'])],
-    ['Такси', [['R', 'Пассажиры платят за час на линии, ₸', 'money'], ['rLog', 'Считать по моим сменам (от 10 смен)', 'bool']]],
+    // R: летний месяц опытного водителя в ценах rBase. Если вписать цифру зимы или первых недель, прогноз ещё раз снимет с неё сезон и разгон
+    ['Такси', [['R', 'Пассажиры платят за час на линии летом, ₸', 'money'], ['rLog', 'Считать по моим сменам (от 10 смен)', 'bool']],
+      g => `Картой + Наличными у опытного водителя летом, после первых двух месяцев, в ценах ${C.MONG[+(g.rBase || g.start).slice(5) - 1]} ${(g.rBase || g.start).slice(0, 4)}. Зиму, первые недели и рост цен прогноз добавит сам. По исследованию 18.11 вероятно 2 900 ₸, плохой месяц 2 500, хороший 3 400.`],
     ['Даты', [['otbOpen', 'Депозит Отбасы открыт', 'date'], ['license', 'Права', 'date'], ['taxiFrom', 'Первая смена в такси', 'date'], ['carFrom', 'Своя машина с (пусто: всё время аренда)', 'date']]],
-    ['Машина', [['price', 'Цена машины, ₸', 'money'], ['down', 'Взнос, %', 'num'], ['v36', 'Цена продажи через 3 года, ₸', 'money'], ['l100', 'Расход, л на 100 км', 'num'], ['repair', 'Резерв на ремонт в месяц, ₸', 'price'], ['fuel', 'Топливо', 'fuel'], ['gasFrom', 'Газ с (пусто: сразу с покупки)', 'date']]],
+    ['Машина', [['price', 'Цена машины, ₸', 'money'], ['down', 'Взнос, %', 'num'], ['v36', 'Цена продажи через 3 года, ₸', 'money'], ['l100', 'Расход в среднем за год, л на 100 км', 'num'], ['repairKm', 'Ремонт старой машины сейчас, ₸ на 1 км', 'price1'], ['repair', 'Свой резерв на ремонт в месяц, ₸', 'price'], ['fuel', 'Топливо', 'fuel'], ['gasFrom', 'Газ с (пусто: сразу с покупки)', 'date']]],
     ['Топливо', [['petrol', 'Бензин сейчас, ₸ за литр', 'price'], ['gas', 'Газ сейчас, ₸ за литр', 'price']]],
-    ['Аренда', [['rentDay', 'Аренда в сутки сейчас, ₸', 'price'], ['rentL100', 'Расход арендной машины, л на 100 км', 'num']]],
+    ['Аренда', [['rentDay', 'Аренда в сутки сейчас, ₸', 'rprice'], ['rentL100', 'Расход арендной машины в среднем за год, л на 100 км', 'num']],
+      () => 'Первый в Яндекс Гараже на 18.11.2026: 10 000 в день и 5,9% парку, выходной не платишь. Летом расход меньше, зимой больше.'],
   ];
+  // газ остаётся настройкой, но не советом (исследование 18.11, база знаний Яндекс Про standards-check/skk)
+  const GAS_NOTE = nb('Яндекс Про в Астане на очной проверке требует машину без ГБО, а на машину в залоге Kaspi доп. оборудование ставят только с согласия банка.');
   const getF = (g, k) => k.indexOf('.') > 0 ? (g[k.split('.')[0]] || {})[k.split('.')[1]] : g[k];
   function vSettings() {
     const g = S().set, FN = C.growth(g, TODAY.slice(0, 7))[0];
@@ -1614,20 +1810,27 @@
     const field = ([k, label, type, ph]) => {
       const v = getF(g, k);
       if (type === 'bool') return `<label class="fld sw"><span>${label}</span><input type="checkbox" data-f="${k}" ${v ? 'checked' : ''}></label>`;
-      if (type === 'fuel') return `<div class="fld"><span>${label}</span><div class="segm">${[['petrol', 'бензин'], ['gas', 'газ']].map(([x, n]) => `<button data-a="fuel" data-v="${x}" aria-pressed="${v === x}">${n}</button>`).join('')}</div></div>`;
+      if (type === 'fuel') return `<div class="fld"><span>${label}</span><div class="segm">${[['petrol', 'бензин'], ['gas', 'газ']].map(([x, n]) => `<button data-a="fuel" data-v="${x}" aria-pressed="${v === x}">${n}</button>`).join('')}</div><p class="sub">${GAS_NOTE}</p></div>`;
+      // сумма с копейками в сегодняшних ценах (ремонт на км)
+      if (type === 'price1') return `<label class="fld"><span>${label}</span><input inputmode="decimal" data-f="${k}" data-t="price1" value="${C.num1((+v || 0) * FN)}"></label>`;
       if (type === 'date') return `<label class="fld"><span>${label}</span><input type="date" data-f="${k}" value="${esc(v || '')}"></label>`;
       if (type === 'text') return `<label class="fld"><span>${label}</span><input data-f="${k}" data-t="text" maxlength="120" value="${esc(v || '')}" placeholder="например: своя квартира в 23"></label>`;
-      if (type === 'price') return `<label class="fld"><span>${label}</span><input inputmode="numeric" data-f="${k}" data-t="price" value="${fmtIn(Math.round(v * FN))}"></label>`;
+      // rprice: аренда, она растёт с ценами только после rBase (C.rentF)
+      if (type === 'price' || type === 'rprice') return `<label class="fld"><span>${label}</span><input inputmode="numeric" data-f="${k}" data-t="${type}" value="${fmtIn(Math.round(v * (type === 'rprice' ? C.rentF(g, TODAY.slice(0, 7)) : FN)))}"></label>`;
       return `<label class="fld"><span>${label}</span><input inputmode="decimal" data-f="${k}" data-t="${type}" value="${type === 'money' ? fmtIn(v) : esc(String(v == null ? '' : v).replace('.', ','))}"${ph ? ` placeholder="${esc(ph(g))}"` : ''}></label>`;
     };
-    // своя машина записана: её цена и кредит меняются в карточке Моя машина
-    const carOwn = ['price', 'down', 'v36'], hide = f => S().car && carOwn.indexOf(f[0]) >= 0;
+    // своя машина записана: её цена и кредит меняются в карточке Моя машина. Свой резерв на ремонт в месяц виден, только если он задан
+    const carOwn = ['price', 'down', 'v36'], hide = f => (S().car && carOwn.indexOf(f[0]) >= 0) || (f[0] === 'repair' && !(g.repair > 0));
+    const p = v => C.money(Math.round(v * FN)), rb = C.MONG[+(g.rBase || g.start).slice(5) - 1] + ' ' + (g.rBase || g.start).slice(0, 4);
     return `
     <header class="top"><div class="top-r"><button class="icon-btn" data-a="sub-back" aria-label="Назад">${ic('left')}</button><div><div class="top-k">Профиль</div><h1 class="top-t">Настройки</h1></div></div></header>
-    ${FIELDS.map(([t, fs]) => `<section class="card"><div class="over">${t}</div>${t === 'Машина' && S().car ? `<p class="sub">Своя машина записана: ${esc(S().car.name)}. Цена и кредит меняются в Деньгах, в карточке Моя машина.</p>` : ''}${fs.filter(f => !hide(f)).map(field).join('')}${t.indexOf('Конверты') === 0 ? priceNote(t.indexOf('до такси') > 0 ? 'envPre' : 'env') : ''}</section>`).join('')}
+    ${FIELDS.map(([t, fs, note]) => `<section class="card"><div class="over">${t}</div>${t === 'Машина' && S().car ? `<p class="sub">Своя машина записана: ${esc(S().car.name)}. Цена и кредит меняются в Деньгах, в карточке Моя машина.</p>` : ''}${fs.filter(f => !hide(f)).map(field).join('')}${t.indexOf('Конверты') === 0 ? priceNote(t.indexOf('до такси') > 0 ? 'envPre' : 'env') : ''}${note ? `<p class="sub">${nb(note(g))}</p>` : ''}</section>`).join('')}
     <section class="card"><div class="over">План</div><p class="sub">С планом сравнивается, впереди ты или отстаёшь. Если поменял цель, даты или машину, пересчитай план от сегодня.</p>
       <div class="btns"><button class="btn alt sm" data-a="rebase">Пересчитать план от сегодня</button></div></section>
-    <section class="card"><div class="over">Как считается</div><p class="sub">Помесячно: комиссия Яндекса 17%, парк 5,9% на аренде, соцплатежи самозанятого 4%, бензин 255 ₸, газ 112 ₸ за литр, рост цен 9% в год, выручки ${C.num1(g.gRev)}% в год, кредит около 2,5% в месяц с досрочкой, Отбасы 2% годовых и премия 20% до 200 МРП в год. Жизнь вычитается по конвертам, машина считается по цене продажи, кредит вычитается.</p></section>
+    <section class="card"><div class="over">Как считается</div><p class="sub">${nb(`Помесячно, по исследованию 18.11. Пассажиры платят ${C.money(g.R)} в час на линии летом у опытного водителя, в ценах ${rb}: до ${rb} тариф ровный, дальше растёт на ${C.num1(g.gRev)}% в год. Январь и февраль на 12% слабее, март на 5%, с сентября по декабрь на 5% сильнее. Первые 30 дней такси 87%, следующие 30 дней 97%. Часы сверх 12 в смене дают 95%.`)}</p>
+      <p class="sub">${nb(`Комиссия Яндекса ${C.num1(g.yandex)}%, соцплатежи ${C.num1(g.tax)}%, чаевые +${C.num1(g.tips)}%. Парк ${C.num1(g.park)}% только на аренде, своя машина напрямую с Яндексом. Свои пропуски ${C.num1(g.lostMe)} смены в месяц, на аренде за них ${g.rentLostPay}% аренды, своя ещё ${C.num1(g.lost)} дня в ремонте. Бензин ${p(g.petrol)} за литр, ${C.num1(g.kmH)} км за час на линии, ремонт своей ${C.num1(g.repairKm * FN)} ₸ на км.`)}</p>
+      <p class="sub">${nb(`Рост цен ${C.num1(g.gCost)}% в год, кредит около 2,5% в месяц с досрочкой, Отбасы 2% годовых и премия 20% до 200 МРП в год. Жизнь вычитается по конвертам, машина считается по цене продажи, кредит вычитается. При покупке машины кроме взноса сразу уходят страховки, регистрация, диагностика и первое ТО: сейчас около ${C.money(r1k((g.ogpo + g.osgop + g.regFee + g.diag + (g.buyOther || 0)) * FN))}.`)}</p>
+      <p class="sub">${nb(`Лимит самозанятого считается по всему доходу за месяц, такси и доставка вместе: 1 297 500 ₸ в 2026 году и 1 407 900 в 2027, если подпишут бюджет с МРП 4 693. Выше нужно ИП.`)}</p></section>
     ${'Notification' in window ? `<section class="card"><div class="over">Телефон</div><label class="fld sw"><span>Показывать смену с таймером в шторке</span><input type="checkbox" data-shade="1"${shadeOn() ? ' checked' : ''}></label></section>` : ''}
     <section class="card"><button class="btn danger" data-a="reset">${ic('trash')}Стереть всё на этом телефоне</button></section>`;
   }
@@ -1816,7 +2019,7 @@
       if (broke) msgs.push([`${cap(C.DOWL[C.dow(d)])}: заморозка закрыла пропуск, но потом серия прервалась.${ch ? ` Вернуть её можно: ещё ${left} ${C.plural(left, ['смена', 'смены', 'смен'])} до ${C.dateShort(ch.until)}.` : ''}`, 'warn']);
       else { msgs.push([`${cap(C.DOWL[C.dow(d)])}: смены не было, серию спасла заморозка. Серия ${pl.streak}, заморозок ${pl.freezes}.`, 'good']); UI.crack = true; }
     }
-    for (const d of pl.frzGot || []) if (d >= week && seen.indexOf('g' + d) < 0) { keys.push('g' + d); msgs.push([`Новая заморозка серии: теперь ${pl.freezes}. Она спасёт серию в пропущенный день.`, 'good']); }
+    for (const d of pl.frzGot || []) if (d >= week && seen.indexOf('g' + d) < 0) { keys.push('g' + d); msgs.push([pl.freezes > 0 ? `Новая заморозка серии: теперь ${pl.freezes}. Она спасёт серию в пропущенный день.` : 'Новая заморозка серии сразу спасла серию в пропущенный день.', 'good']); }
     for (const r of pl.restores || []) if (r.d >= week && seen.indexOf('r' + r.d) < 0) { keys.push('r' + r.d); msgs.push([`Серия вернулась: ${r.L} + 3 = ${r.n}. Комбо снова растёт.`, 'good']); }
     if (!keys.length) return;
     Store.update(s => { s.seen = Object.assign({}, s.seen, { recap: ((s.seen && s.seen.recap) || []).concat(keys).slice(-40) }); }, 'seen');
@@ -1875,6 +2078,15 @@
     const dx = playerOf(st, TODAY).xp - before.xp;
     after(before, p ? [[p.title + '. ' + p.text + (dx ? ` ${dx > 0 ? '+' : '−'}${C.grp(Math.abs(dx))} XP.` : ''), p.tone === 'warn' ? 'warn' : 'good']] : []);
   }
+  // лимит самозанятого 300 МРП за месяц (1 297 500 в 2026, 1 407 900 в 2027): строка с 70% лимита, выше нужно ИП
+  function seNote(st, mk) {
+    const se = C.seMonth(st, mk);
+    if (!(se.share >= 0.7)) return '';
+    // в лимит идёт весь доход самозанятого за месяц: в такси оплата пассажиров, до такси заработок на доставке
+    const what = se.pre > 0 && se.taxi > 0 ? 'Доход самозанятого (такси и доставка)' : se.pre > 0 ? 'Доход самозанятого' : 'Оплата пассажиров';
+    return `<div class="rc-lim${se.share >= 1 ? ' hot' : ''}">${ic('receipt')}<span>${se.share >= 1 ? `${what} за месяц больше лимита самозанятого (${C.money(se.lim)}): за 5 рабочих дней нужно уведомление об ИП.`
+      : `Лимит самозанятого за месяц: ${Math.round(se.share * 100)}%, примерно ${C.money(r1k(se.gross))} из ${C.money(se.lim)}. Выше нужно ИП.`}</span></div>`;
+  }
   // ---------------------------------------------------------------- чек смены
   const STAMP = { 'S+': 'gold', S: 'violet', A: 'green', B: 'blue', C: 'gray' };
   const SHIFT_CATS = ['Смены', 'Часы', 'Серия', 'Недели', 'Месяц', 'Сверх плана', 'Учёт', 'Рекорды', 'Боссы', 'Задания', 'Особые'];
@@ -1892,7 +2104,7 @@
     if (before) Store.update(s => { const sn = s.seen || {}; s.seen = Object.assign({}, sn, { badges: Array.from(new Set((sn.badges || []).concat(pl.badges.filter(b => b.on).map(b => b.id)))), recap: restore ? (sn.recap || []).concat(['r' + d]).slice(-40) : sn.recap || [] }); }, 'seen');
     // штамп и что он значит: в ценах дня смены, как в Яндекс Про
     const ph = C.phaseAt(st, d), perH = app > 0 ? app / h : 0, r50 = v => C.money(Math.round(v / 50) * 50);
-    const why = gr ? (gr.ph === 'pre' ? `${C.money(Math.round(perH))} в час на руки.` : `${C.money(Math.round(perH))} в час в приложении, это примерно ${r50(gr.vN)} выручки в час.`) + (gr.next ? ` До ${gr.next.g} нужно от ${r50(gr.next.vN)}${gr.ph === 'pre' ? ' в час на руки' : ' выручки в час'}.` : ' Лучше не бывает.')
+    const why = gr ? (gr.ph === 'pre' ? `${C.money(Math.round(perH))} в час на руки.` : `${C.money(Math.round(perH))} в час в приложении, это примерно ${r50(gr.vN)} оплаты пассажиров в час.`) + (gr.next ? ` До ${gr.next.g} нужно от ${r50(gr.next.vN)}${gr.ph === 'pre' ? ' в час на руки' : ' оплаты пассажиров в час'}.` : ' Лучше не бывает.')
       : 'Внеси сумму из Яндекс Про, и смена получит штамп за заработок в час.';
     // смысл: сколько это для цели (маленькие суммы точнее, до сотни)
     const sm = C.shiftMoney(st, d, h, app), dd = C.daysFor(m.fc, sm.goal), rr = v => Math.abs(v) < 10000 ? Math.round(v / 100) * 100 : r1k(v);
@@ -1910,18 +2122,13 @@
     if (app > 0 && ph !== 'pre') {
       const g = st.set;
       money = `<details class="rc-money"><summary>Куда ушли деньги пассажиров</summary><ul>
-        ${row('Пассажиры заплатили примерно', r1(sm.gross))}${row('Яндекс ' + C.num1(g.yandex) + '%', '−' + r1(sm.yandex))}${sm.park ? row('Парк ' + C.num1(g.park) + '%', '−' + r1(sm.park)) : ''}${row('Соцплатежи ' + C.num1(g.tax) + '%', '−' + r1(sm.tax))}
-        ${row('В Яндекс Про', C.money(app), 'sum')}${sm.rent ? row('Аренда', '−' + r1(sm.rent)) : ''}${row('Бензин', '−' + r1(sm.fuel))}${row('Мойка', '−' + r1(sm.wash))}${sm.wear ? row('Масло и шины', '−' + r1(sm.wear)) : ''}
+        ${row('Пассажиры заплатили примерно', r1(sm.gross))}${row('Яндекс ' + C.num1(g.yandex) + '%', '−' + r1(sm.yandex))}${sm.park ? row('Парк ' + C.num1(g.park) + '%', '−' + r1(sm.park)) : ''}${row('Соцплатежи ' + C.num1(g.tax) + '%', '−' + r1(sm.tax))}${sm.tips ? row('Чаевые ' + C.num1(g.tips) + '%', '+' + r1(sm.tips)) : ''}
+        ${row('В Яндекс Про', C.money(app), 'sum')}${sm.rent ? row('Аренда', '−' + r1(sm.rent)) : ''}${row('Бензин', '−' + r1(sm.fuel))}${row('Мойка', '−' + r1(sm.wash))}${sm.wear ? row('Масло, шины и ремонт', '−' + r1(sm.wear)) : ''}
         ${row('Осталось со смены', r1(sm.net), 'sum')}${row(ph === 'own' ? 'Жизнь и машина на эту смену' : 'Доля жизни на эту смену', '−' + r1(sm.fixed))}${row(sm.goal >= 0 ? 'В квартиру' : 'Не хватило на жизнь', r1(Math.abs(sm.goal)), 'sum ' + (sm.goal >= 0 ? 'up' : 'down'))}
       </ul><p class="sub">Это расчёт по модели, а не чеки: примерно.</p></details>`;
     }
-    // лимит самозанятого: месяц смен в полной стоимости поездок, с 70%
-    let limit = '';
-    if (ph !== 'pre') {
-      const mk = C.mkOf(d), lim = (mk < '2027' ? 4325 : 4693) * 300;
-      let gross = 0; for (const [dd2, y] of Object.entries(st.shifts)) if (dd2.slice(0, 7) === mk && y.app > 0 && C.phaseAt(st, dd2) !== 'pre') gross += y.app / C.keepOf(st.set, C.phaseAt(st, dd2));
-      if (gross >= lim * 0.7) limit = `<div class="rc-lim${gross >= lim ? ' hot' : ''}">${ic('receipt')}<span>${gross >= lim ? `Доход месяца выше лимита самозанятого (${C.money(lim)}): за 5 рабочих дней нужно уведомление об ИП.` : `Лимит самозанятого за месяц: ${Math.round(gross / lim * 100)}%, примерно ${C.money(r1k(gross))} из ${C.money(lim)}.`}</span></div>`;
-    }
+    // лимит самозанятого: оплата пассажиров за месяц, с 70%
+    const limit = ph !== 'pre' ? seNote(st, C.mkOf(d)) : '';
     UI.receipt = true;
     sheet(`<div class="rc${live ? ' live' : ''}">
       <div class="rc-h"><div><div class="over">Чек смены</div><div class="h3">${cap(C.DOWL[C.dow(d)])}, ${C.dateShort(d)}</div>
@@ -2053,7 +2260,7 @@
       case 'perk-reset': if (confirm('Сбросить все навыки? Очки вернутся, изучишь заново.')) { Store.update(s => { s.perks = {}; }, 'perk'); toast('Навыки сброшены, очки вернулись'); } break;
       case 'car-preset': {
         const c = C.CARS.find(x => x.id === el.dataset.id); if (!c) break;
-        Store.update(s => { Object.assign(s.set, { price: c.price, down: c.down, v36: c.v36, l100: c.l100, repair: c.repair, lost: c.lost }); }, 'set');
+        Store.update(s => { Object.assign(s.set, { price: c.price, down: c.down, v36: c.v36, l100: c.l100, repairKm: c.repairKm, repair: 0, lost: c.lost }); }, 'set');
         toast(`Машина: ${c.name}, ${c.how}. Прогноз пересчитан.`, 'good'); break;
       }
       case 'wif': UI.wif = !UI.wif; render(); break;
@@ -2126,7 +2333,7 @@
         const k = a === 'car-how' ? 'carHow' : 'carFuel', v = el.dataset.v, was = UI[k];
         UI[k] = v; el.parentElement.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
         if (a === 'car-how') $('#car-loan').hidden = v !== 'loan';
-        else { const f = $('#f-cf'); if (f && num0(f.value) === +f.dataset[was]) f.value = fmtIn(+f.dataset[v]); $('#f-cf-l').textContent = 'Литр ' + (v === 'gas' ? 'газа' : 'бензина') + ', ₸'; }
+        else { const f = $('#f-cf'), gn = $('#f-gas-n'); if (f && num0(f.value) === +f.dataset[was]) f.value = fmtIn(+f.dataset[v]); $('#f-cf-l').textContent = 'Литр ' + (v === 'gas' ? 'газа' : 'бензина') + ', ₸'; if (gn) gn.hidden = v !== 'gas'; }
         carCalc(); break;
       }
       case 'save-car': {
@@ -2182,18 +2389,21 @@
         closeSheet(); buzz([12, 40, 12]);
         after(before, [[b.bal <= 0 ? `Кредит закрыт! Машина полностью твоя.` : `Досрочно ${C.money(amt)}. Процентов меньше примерно на ${C.money(saved)}.`, 'good']]); break;
       }
-      case 'gas-on': {
-        const g = S().set;
-        if (!confirm(`Записать установку газа за ${C.money(g.gasCost)}? С сегодняшнего дня расчёт считает топливо по газу.`)) break;
-        const before = snap();
-        Store.update(s => { s.set.fuel = 'gas'; s.set.gasFrom = TODAY; s.done.gas = TODAY; s.money.push({ d: TODAY, kind: 'add', add: -s.set.gasCost, to: 'cash', note: 'газ (ГБО)', t: Date.now() }); s.money.sort(C.byDate); }, 'set');
-        after(before, [['Газ стоит. Топливо дешевле, прогноз пересчитан.', 'good']]); break;
-      }
       case 'fx-next': nextFx(); break;
       case 'sub': UI.sub = el.dataset.v; UI.subDepth = 1; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
-      case 'kb': if (KB.err === 'net') { KB.err = null; KB.errK = null; } UI.sub = 'kb'; UI.kbNote = null; UI.kbStack = []; UI.kbHl = ''; UI.subDepth = 1; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      case 'kb': if (KB.err === 'net') { KB.err = null; KB.errK = null; } UI.kbPend = null; UI.sub = 'kb'; UI.kbNote = null; UI.kbStack = []; UI.kbHl = ''; UI.subDepth = 1; try { history.pushState({ put: 'sub' }, ''); } catch (e) { /* ок */ } render(); window.scrollTo(0, 0); break;
+      // сразу нужная заметка (ссылка с другого экрана): назад ведёт в список заметок, ещё раз назад туда, откуда пришёл.
+      // Пока заметки грузятся или закрыты кодом, экран показывает это, а заметка откроется, когда они откроются
+      case 'kb-open': {
+        // ссылка на заметку и раздел (data-v: начало заголовка). Без ключа: экран Заметки с замком одной записью в истории,
+        // заметка откроется после кода
+        const id = el.dataset.id, sec = el.dataset.v || '', k = S().kb && S().kb.k;
+        act('kb', el);
+        if (!KB.data) UI.kbPend = { id, sec }; else kbOpenNote(id, sec);
+        break;
+      }
       case 'kb-back': if (history.state && (history.state.put === 'sub' || history.state.put === 'kbnote')) history.back(); else { UI.sub = null; UI.kbNote = null; UI.subDepth = 0; render(); } break;
-      case 'kb-note': kbGo(el.dataset.id, el.dataset.hl ? KB.q : '', +el.dataset.k || 0); break;
+      case 'kb-note': kbGo(el.dataset.id, el.dataset.hl ? KB.q : '', +el.dataset.k || 0, el.dataset.v || ''); break;
       case 'kb-top': window.scrollTo({ top: 0, behavior: reduced() ? 'auto' : 'smooth' }); break;
       case 'kb-to': { const h = document.getElementById(el.dataset.v); if (h) h.scrollIntoView({ behavior: reduced() ? 'auto' : 'smooth', block: 'start' }); break; }
       case 'kb-dbt': { const id = el.dataset.id; KB.open[id] = !KB.open[id]; if (!KB.open[id]) { delete KB.dbq[id]; delete KB.shown[id]; } render(); break; }
@@ -2261,7 +2471,8 @@
         if (i.dataset.t === 'money' && k !== 'target') v = Math.max(0, v);
         if (k === 'down') v = Math.min(100, Math.max(0, v));
         if (k === 'l100' || k === 'rentL100') v = Math.max(0, v);
-        if (i.dataset.t === 'price') { if (!(v > 0)) return no('Впиши сумму больше нуля'); v = v / C.growth(S().set, TODAY.slice(0, 7))[0]; }
+        if (i.dataset.t === 'price' || i.dataset.t === 'rprice') { if (!(v > 0)) return no('Впиши сумму больше нуля'); v = v / (i.dataset.t === 'rprice' ? C.rentF(S().set, TODAY.slice(0, 7)) : C.growth(S().set, TODAY.slice(0, 7))[0]); }
+        if (i.dataset.t === 'price1') v = Math.max(0, v) / C.growth(S().set, TODAY.slice(0, 7))[0];
         if (v !== parseNum(i.value)) res.fix.push(i); // поправили до допустимого: покажем, что сохранено
       }
       put.push([k, v]);
@@ -2281,7 +2492,8 @@
   // вернуть в поле то, что сохранено
   function showField(i) {
     const v = getF(S().set, i.dataset.f);
-    i.value = i.type === 'date' ? v || '' : i.dataset.t === 'money' ? fmtIn(v) : i.dataset.t === 'price' ? fmtIn(Math.round(v * C.growth(S().set, TODAY.slice(0, 7))[0])) : String(v == null ? '' : v).replace('.', ',');
+    const FN = C.growth(S().set, TODAY.slice(0, 7))[0], FR = C.rentF(S().set, TODAY.slice(0, 7));
+    i.value = i.type === 'date' ? v || '' : i.dataset.t === 'money' ? fmtIn(v) : i.dataset.t === 'price' ? fmtIn(Math.round(v * FN)) : i.dataset.t === 'rprice' ? fmtIn(Math.round(v * FR)) : i.dataset.t === 'price1' ? C.num1((+v || 0) * FN) : String(v == null ? '' : v).replace('.', ',');
   }
   // личная ссылка: #s=<base64url JSON> подставляет настройки и задания до первого запуска и стирается из адреса
   function applySetup() {
@@ -2393,7 +2605,9 @@
     // открытая заметка не перерисовывается от статуса облака, только если поменялись вход или код
     if (why === 'cloud' && UI.sub === 'kb' && KB.data) { const st0 = S(), sig = !!(Store.cloud && Store.cloud.user) + '|' + (st0 && st0.kb ? st0.kb.k : ''); if (sig === UI.kbSig) return; UI.kbSig = sig; }
     const a = document.activeElement;
-    if (why === 'cloud' && a && a.tagName === 'INPUT') return; // не сбивать ввод из-за статуса облака
+    // ключ заметок пришёл из облака, пока фокус в поле кода: перерисовать, иначе замок так и висит
+    const kbKey = why === 'cloud' && UI.sub === 'kb' && !KB.data && S().kb && S().kb.k;
+    if (why === 'cloud' && a && a.tagName === 'INPUT' && !kbKey) return; // не сбивать ввод из-за статуса облака
     render();
     if (why === 'cloud' || why === 'import') { celebrate(); shadeShow(); }
   });
